@@ -1,0 +1,184 @@
+{% macro csrf_field() -%}
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}" data-no-persist="1">
+{%- endmacro %}
+
+{% if current_user %}
+  <section class="settings-section">
+    <h2>{{ t('settings.integrations.api_keys') }}</h2>
+    <p class="field-hint">{{ t('settings.integrations.let_bots_and_scripts_access_the_panel') }}</p>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.keys') }}</span><span class="setting-value">{{ api_keys|length }}</span></summary>
+      <div class="settings-body">
+        {% set revoked_keys = api_keys | selectattr('revoked_at') | list %}
+        {% if revoked_keys %}
+          <label class="check-field"><input type="checkbox" id="show-revoked-keys"> {{ t('settings.integrations.show_revoked_keys_revoked_keys', revoked_keys=(revoked_keys|length)) }}</label>
+        {% endif %}
+        {% if api_keys %}
+          <div class="settings-table">
+            <table class="data-table">
+              <thead><tr><th>{{ t('server_detail.name') }}</th><th>{{ t('settings.integrations.permissions') }}</th><th>{{ t('settings.integrations.created') }}</th><th>{{ t('settings.integrations.last_request') }}</th><th>{{ t('settings.integrations.expires') }}</th><th>{{ t('settings.integrations.limit') }}</th><th>{{ t('schedule.status') }}</th><th>{{ t('schedule.actions') }}</th></tr></thead>
+              <tbody id="api-keys-tbody">
+                {% for k in api_keys %}
+                  <tr{% if k.revoked_at %} class="api-key-revoked"{% endif %}>
+                    <td>{{ k.name }}</td>
+                    <td><code>{{ k.scopes.split(',') | join(' · ') }}</code></td>
+                    <td>{{ k.created_at | unixtime }}</td>
+                    <td>
+                      {% if k.last_used_at %}{{ k.last_used_at | unixtime }}<br>{{ k.last_used_ip or '—' }}
+                      {% else %}{{ t('settings.integrations.no_requests_yet') }}{% endif %}
+                    </td>
+                    <td>{% if k.expires_at %}{{ k.expires_at | unixtime }}{% else %}{{ t('settings.integrations.never_expires') }}{% endif %}</td>
+                    <td>{{ t('settings.integrations.rate_limit_per_min_min', rate_limit_per_min=(k.rate_limit_per_min)) }}</td>
+                    <td>
+                      {% if k.revoked_at %}{{ t('settings.integrations.revoked') }} {{ k.revoked_at | unixtime }}{% elif k.expires_at and k.expires_at < security.now %}{{ t('settings.integrations.expired') }}
+                      {% else %}{{ t('settings.integrations.active') }}{% endif %}
+                    </td>
+                    <td>
+                      <div class="action-row">
+                        <a class="btn btn-sm" href="/settings/api-keys/{{ k.id }}/requests">{{ t('settings.integrations.requests') }}</a>
+                        {% if k.revoked_at %}
+                          <form method="post" action="/settings/api-keys/{{ k.id }}/delete" data-confirm="{{ t('settings.integrations.delete_the_entry_for_key_label_from_history', label=(k.name)) }}">
+                            {{ csrf_field() }}<button class="btn btn-sm">{{ t('saves.delete') }}</button>
+                          </form>
+                        {% else %}
+                          <form method="post" action="/settings/api-keys/{{ k.id }}/revoke" data-confirm="{{ t('settings.integrations.revoke_key_label_applications_using_this_key_will', label=(k.name)) }}">
+                            {{ csrf_field() }}<button class="btn btn-sm">{{ t('settings.integrations.revoke') }}</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>{{ t('settings.integrations.no_keys_yet') }}</p>
+        {% endif %}
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.create_key') }}</span></summary>
+      <div class="settings-body">
+        <form method="post" action="/settings/api-keys/new" class="form" autocomplete="off" data-persist>
+          {{ csrf_field() }}
+          <label class="field">
+            <span class="field-label">{{ t('settings.integrations.key_name') }}</span>
+            <input name="name" class="input" minlength="1" maxlength="64" placeholder="{{ t('settings.integrations.for_example_discord_bot') }}" required>
+          </label>
+          <fieldset class="settings-choices">
+            <legend>{{ t('settings.integrations.allow_this_application_to') }}</legend>
+            {% for scope, label in [('read', t('settings.integrations.read_status_metrics_and_audit_events')), ('command', t('settings.integrations.send_rcon_commands')),
+                                     ('control', t('settings.integrations.manage_server_lifecycle_and_schedules')), ('admin', t('settings.integrations.manage_servers_files_mods_and_webhooks'))] %}
+              <label><input type="checkbox" name="scope_{{ scope }}" value="1"{% if scope == 'read' %} checked{% endif %}> {{ label }} <code>{{ scope }}</code></label>
+            {% endfor %}
+          </fieldset>
+          <details class="settings-options">
+            <summary>{{ t('settings.integrations.expiry_and_request_limit') }}</summary>
+            <label class="field">
+              <span class="field-label">{{ t('settings.integrations.expiry_in_days_enter_0_for_no_expiry') }}</span>
+              <input type="number" name="expires_in_days" class="input" min="0" max="3650" value="0">
+            </label>
+            <label class="field">
+              <span class="field-label">{{ t('settings.integrations.requests_per_minute') }}</span>
+              <input type="number" name="rate_limit_per_min" class="input" min="1" max="100000" value="60">
+            </label>
+          </details>
+          <p class="field-hint">{{ t('settings.integrations.copy_the_key_when_you_create_it_this') }}</p>
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.integrations.create_key') }}</button></div>
+        </form>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.api_documentation') }}</span></summary>
+      <div class="settings-body">
+        <p><a href="/api/v1/docs" target="_blank" rel="noopener">{{ t('settings.integrations.open_swagger') }}</a> · <a href="/api/v1/redoc" target="_blank" rel="noopener">{{ t('settings.integrations.open_redoc') }}</a></p>
+        <pre><code>curl -H "Authorization: Bearer rpk_…" https://roboport.local/api/v1/servers</code></pre>
+      </div>
+    </details>
+  </section>
+
+  <section class="settings-section">
+    <h2>{{ t('settings.integrations.webhooks') }}</h2>
+    <p class="field-hint">{{ t('settings.integrations.send_panel_events_to_other_services') }}</p>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.connected_webhooks') }}</span><span class="setting-value">{{ webhooks|length }}</span></summary>
+      <div class="settings-body">
+        {% if webhooks %}
+          <div class="settings-table">
+            <table class="data-table">
+              <thead><tr><th>{{ t('server_detail.name') }}</th><th>{{ t('settings.integrations.address') }}</th><th>{{ t('settings.integrations.events') }}</th><th>{{ t('settings.integrations.signing_secret') }}</th><th>{{ t('settings.integrations.last_delivery') }}</th><th>{{ t('schedule.status') }}</th><th>{{ t('schedule.actions') }}</th></tr></thead>
+              <tbody>
+                {% for w in webhooks %}
+                  <tr>
+                    <td>{{ w.name }}</td><td class="confidential">{{ w.url }}</td>
+                    <td>{{ t('settings.integrations.all') if w.events == '*' else w.events.split(',') | join(' · ') }}</td>
+                    <td><details><summary>{{ t('log_filter.show') }}</summary><code class="confidential">{{ w.secret }}</code></details></td>
+                    <td>{% if w.last_delivery_at %}{{ w.last_delivery_at | unixtime }} · {{ w.last_delivery_status or '—' }}{% else %}{{ t('settings.integrations.no_deliveries_yet') }}{% endif %}</td>
+                    <td>
+                      {% if w.broken_at %}
+                        {{ t('settings.integrations.paused_consecutive_failures_failed_deliveries', consecutive_failures=(w.consecutive_failures)) }}
+                        {% if w.last_error %}<p class="field-hint">{{ w.last_error }}</p>{% endif %}
+                      {% else %}{{ t('settings.integrations.active_label') if w.enabled else t('settings.general.disabled') }}{% endif %}
+                    </td>
+                    <td>
+                      <div class="action-row">
+                        <form method="post" action="/settings/webhooks/{{ w.id }}/test">
+                          {{ csrf_field() }}<button class="btn btn-sm">{{ t('settings.integrations.test') }}</button>
+                        </form>
+                        {% if w.broken_at %}
+                          <form method="post" action="/settings/webhooks/{{ w.id }}/resume">
+                            {{ csrf_field() }}<button class="btn btn-sm">{{ t('settings.integrations.resume') }}</button>
+                          </form>
+                        {% endif %}
+                        <form method="post" action="/settings/webhooks/{{ w.id }}/toggle">
+                          {{ csrf_field() }}
+                          <input type="hidden" name="enabled" value="{{ '0' if w.enabled else '1' }}">
+                          <button class="btn btn-sm">{{ t('settings.integrations.disable') if w.enabled else t('settings.integrations.enable') }}</button>
+                        </form>
+                        <form method="post" action="/settings/webhooks/{{ w.id }}/delete" data-confirm="{{ t('settings.integrations.delete_webhook_label_it_will_stop_sending_events', label=(w.name)) }}">
+                          {{ csrf_field() }}<button class="btn btn-sm">{{ t('saves.delete') }}</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>{{ t('settings.integrations.no_webhooks_yet') }}</p>
+        {% endif %}
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.add_webhook') }}</span></summary>
+      <div class="settings-body">
+        <form method="post" action="/settings/webhooks/new" class="form" autocomplete="off" data-persist>
+          {{ csrf_field() }}
+          <label class="field">
+            <span class="field-label">{{ t('settings.integrations.name') }}</span>
+            <input name="name" class="input" minlength="1" maxlength="64" required>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.integrations.destination_url') }}</span>
+            <input type="url" name="url" class="input" minlength="8" maxlength="500" placeholder="https://…" required>
+          </label>
+          <fieldset class="settings-choices">
+            <legend>{{ t('settings.integrations.events_to_send') }}</legend>
+            <label><input type="checkbox" name="events" value="*" class="cb-classic"> {{ t('settings.audit.all_events') }}</label>
+            {% for event in webhook_events_all %}
+              <label><input type="checkbox" name="events" value="{{ event }}" class="cb-classic"> <code>{{ event }}</code></label>
+            {% endfor %}
+          </fieldset>
+          <p class="field-hint">{{ t('settings.integrations.the_recipient_must_accept_post_requests_with_a') }}</p>
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.integrations.add_webhook') }}</button></div>
+        </form>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.integrations.signature_and_delivery') }}</span></summary>
+      <div class="settings-body"><p>{{ t('webhooks.signature_and_retry_hint', header='X-Roboport-Signature') }}</p></div>
+    </details>
+  </section>
+{% endif %}

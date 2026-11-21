@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from '_partials/_macros.html' import second_factor_field with context %}
+{% block title %}{{ t('stepup.confirm_action_roboport') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('stepup.confirm_sensitive_action') }}</h1>
+
+<section class="card" style="max-width:480px">
+  <div class="card-body">
+
+    <div class="muted small" style="margin-bottom:14px">
+      {{ t('stepup.confirm_your_identity_to_continue_enter_your') }}
+      {% if totp_enabled %}{{ t('stepup.password_and_current_2fa_code') }}{% else %}{{ t('stepup.password') }}{% endif %}{{ t('stepup.you_can_then_perform_other_sensitive_actions_for') }}
+    </div>
+
+    {% if err %}<div class="alert alert-err">{{ err }}</div>{% endif %}
+
+    <form method="post" action="/stepup" class="form" autocomplete="off">
+      <input type="hidden" name="next" value="{{ next }}">
+
+      <label class="field">
+        <span class="field-label">{{ t('stepup.password_username', username=(username)) }}</span>
+        <span class="pw-input">
+          <input type="password" name="password" required class="input"
+                 minlength="8" maxlength="256" autocomplete="current-password" autofocus>
+          <button type="button" class="pw-toggle" aria-label="{{ t('login.toggle_password') }}">👁</button>
+        </span>
+      </label>
+
+      {% if totp_enabled %}
+      {{ second_factor_field() }}
+      {% endif %}
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">{{ t('stepup.confirm') }}</button>
+        <a href="/" class="btn">{{ t('server_new.cancel') }}</a>
+      </div>
+    </form>
+
+  </div>
+</section>
+{% endblock %}

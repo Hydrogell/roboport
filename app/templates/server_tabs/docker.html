@@ -1,0 +1,82 @@
+<div class="terminal-wrap">
+  <div class="terminal-head">
+    <span class="muted small">
+      {{ t('server_tabs.docker.snapshot') }} <code class="mono">docker logs</code> {{ t('server_tabs.docker.with_timestamps_refresh_to_get_newer_entries') }}
+    </span>
+
+    <form method="get" class="inline-form" action="">
+      <label class="muted small" for="docker-tail">{{ t('docker.log_line_limit') }}</label>
+      <select id="docker-tail" name="tail" class="input input-sm" data-auto-submit>
+        {% for lines in tail_choices %}
+          <option value="{{ lines }}" {% if lines == tail %}selected{% endif %}>{{ t('docker.all_log_lines') if lines == 'all' else lines }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm">{{ t('docker.refresh') }}</button>
+      <a class="btn btn-sm" href="/servers/{{ server.uuid }}/docker.txt?tail={{ tail }}">{{ t('docker.download') }}</a>
+    </form>
+  </div>
+
+  {# Фильтр строк лога: рендерится JS-модулем LogFilter (chip-UI). #}
+  <details class="server-log-filters" open>
+    <summary>{{ t('log_filter.filters') }}</summary>
+    <div id="docker-filter-container" style="margin-bottom:6px"></div>
+  </details>
+
+  {% if docker_logs_error %}
+    <pre class="alert-pre">{{ docker_logs_error }}</pre>
+  {% elif not docker_logs %}
+    <div class="empty-state">
+      {{ t('server_tabs.docker.no_logs_the_container_has_not_been_created') }}
+    </div>
+  {% else %}
+    <pre class="terminal terminal-static confidential" id="docker-logs"
+         data-reveal-sec="60"
+         title="{{ t('docker.streamer_mode_blurs_this_content_click_to_reveal') }}">{{ docker_logs }}</pre>
+  {% endif %}
+</div>
+
+<script src="/static/js/log-filter.js?v={{ static_v }}" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Стат-снапшот логов: фильтрация по строкам в браузере. Несколько regex'ов
+  // в каждой группе через chip-UI (модуль LogFilter). Persist per-server.
+  const pre = document.getElementById('docker-logs');
+  const fcont = document.getElementById('docker-filter-container');
+  if (!fcont) return;
+
+  // lines: всегда из оригинального текста (если есть pre — иначе пустой).
+  const original = pre ? pre.textContent : '';
+  const lines = original ? original.split('\n') : [];
+
+  const filter = window.LogFilter.attach({
+    container: fcont,
+    storageKey: 'roboport.docker-filter.{{ server.uuid }}',
+    presets: [
+      { label: window.rpT('log_filter.hide_rcon_label'),
+        title: window.rpT('log_filter.hide_rcon_hint'),
+        hide: ['New RCON connection from IP'] },
+      { label: window.rpT('log_filter.hide_save_label'),
+        title: window.rpT('docker.hide_save_log_lines'),
+        hide: ['Saving (game|map)', '\\bSaved as\\b'] },
+      { label: window.rpT('log_filter.errors_only_label'),
+        title: window.rpT('console.show_only_errors_and_warnings'),
+        show: ['\\b(Error|Warning|Crash)\\b'] },
+    ],
+    onChange: apply,
+  });
+
+  function apply() {
+    if (!pre) return;
+    if (filter.isEmpty()) {
+      pre.textContent = original;
+      filter.setStat(lines.length, lines.length);
+      return;
+    }
+    const out = filter.matchesBatch(lines);
+    pre.textContent = out.join('\n');
+    filter.setStat(out.length, lines.length);
+  }
+
+  apply();
+})();
+</script>

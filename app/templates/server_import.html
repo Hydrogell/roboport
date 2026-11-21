@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ t('view.server_import.title') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('server_import.import_existing_folders') }}</h1>
+
+{% if page_msg %}<div class="alert alert-ok">{{ page_msg }}</div>{% endif %}
+{% if page_err %}<div class="alert alert-err">{{ page_err }}</div>{% endif %}
+
+<div class="muted small" style="margin-bottom:14px">
+  {{ t('servers.import_directory_hint', path='servers/') }}
+</div>
+
+{% if not orphans %}
+  <section class="card">
+    <div class="card-body">
+      <div class="empty-state">
+        {{ t('servers.import_no_unregistered_folders', path='servers/') }}
+      </div>
+    </div>
+  </section>
+{% else %}
+  {% for o in orphans %}
+  <section class="card" style="margin-bottom:12px">
+    <div class="card-head">
+      <span class="card-head-title">📁 servers/{{ o.dir_name }}/</span>
+      <span class="muted small">{{ o.size_h }}</span>
+    </div>
+    <div class="card-body">
+      <form method="post" action="/servers/import" class="form">
+        <input type="hidden" name="dir_name" value="{{ o.dir_name }}">
+
+        <div class="form-row">
+          <label class="field" style="flex:1">
+            <span class="field-label">{{ t('server_import.server_name') }}</span>
+            <input type="text" name="name" required maxlength="40" class="input"
+                   value="{{ o.name }}">
+            <span class="field-hint">{{ t('server_import.up_to_40_characters_use_a_z_0') }}</span>
+          </label>
+
+          <label class="field" style="max-width:180px">
+            <span class="field-label">{{ t('server_import.version') }}</span>
+            <input type="text" name="version" required class="input mono"
+                   list="versions-{{ loop.index }}" pattern="\d+\.\d+\.\d+"
+                   value="{{ o.version or (versions[0] if versions else '') }}"
+                   placeholder="2.0.76">
+            <datalist id="versions-{{ loop.index }}">
+              {% for v in versions %}<option value="{{ v }}">{% endfor %}
+            </datalist>
+          </label>
+
+          <label class="field" style="max-width:140px">
+            <span class="field-label">{{ t('server_import.udp_port') }}</span>
+            <input type="number" name="port" min="1024" max="65535" required class="input"
+                   value="{{ o.port }}">
+          </label>
+        </div>
+
+        <input type="hidden" name="runtime" value="docker">
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">{{ t('server_import.import') }}</button>
+          <a href="/" class="btn">{{ t('server_import.cancel') }}</a>
+        </div>
+      </form>
+    </div>
+  </section>
+  {% endfor %}
+{% endif %}
+
+<div class="muted small" style="margin-top:14px">
+  <a href="/servers/new" class="link">{{ t('server_import.create_a_server') }}</a> · <a href="/" class="link">{{ t('server_import.dashboard') }}</a>
+</div>
+{% endblock %}

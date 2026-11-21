@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.factorio_versions') }} — Roboport{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('nav.factorio_versions') }}</h1>
+
+{% if msg %}<div class="alert alert-ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="alert alert-err">{{ err }}</div>{% endif %}
+
+<div class="muted small" style="margin-bottom:14px">
+  {{ t('updates.description', pulled=pulled_count, total=total_versions) }}
+</div>
+
+{% if not groups %}
+  <div class="empty-state">
+    {{ t('updates.load_failed') }}
+  </div>
+{% else %}
+
+<div class="files-toolbar" style="margin-bottom:12px">
+  <input type="search" id="updates-filter" class="input input-sm"
+         placeholder="{{ t('updates.filter_placeholder') }}"
+         style="width:280px;max-width:100%">
+  <span class="muted small" id="updates-summary">
+    {{ t('updates.branch_count', count=groups|length) }} · {{ t('updates.version_count', count=total_versions) }}
+  </span>
+</div>
+
+<div id="updates-groups">
+  {% for g in groups %}
+  <details class="updates-group" {% if loop.first %}open{% endif %}
+           data-minor="{{ g.minor }}">
+    <summary>
+      <span class="updates-minor mono">{{ g.minor }}</span>
+      <span class="muted small">· {{ t('updates.version_count', count=g.count) }}</span>
+      {% if g.pulled_count %}
+        <span class="status status-online" style="margin-left:8px">{{ t('updates.downloaded_count', count=g.pulled_count) }}</span>
+      {% endif %}
+      <span class="muted small" style="margin-left:auto">{{ t('updates.latest', version=g.newest) }}</span>
+    </summary>
+    <div class="table-scroll"><table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ t('server_import.version') }}</th>
+          <th class="num">{{ t('schedule.status') }}</th>
+          <th class="num">{{ t('saves.size') }}</th>
+          <th class="num">{{ t('updates.image_id') }}</th>
+          <th class="actions-col">{{ t('schedule.actions') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in g['items'] %}
+        <tr data-version="{{ v.version }}">
+          <td>
+            <code class="mono">{{ v.version }}</code>
+            {% if not v.from_hub %}
+              <span class="badge" title="{{ t('updates.local_tag_available_only_on_this_host_not') }}">{{ t('updates.local') }}</span>
+            {% endif %}
+          </td>
+          <td class="num">
+            {% if v.pulled %}
+              <span class="status status-online">{{ t('updates.pulled') }}</span>
+            {% else %}
+              <span class="status status-offline">{{ t('updates.no') }}</span>
+            {% endif %}
+          </td>
+          <td class="num muted version-detail{% if not v.size %} empty-detail{% endif %}"
+              data-label="{{ t('saves.size') }}">{{ v.size or '—' }}</td>
+          <td class="num muted small mono version-detail{% if not v.id %} empty-detail{% endif %}"
+              data-label="{{ t('updates.image_id') }}">{{ v.id or '—' }}</td>
+          <td class="actions">
+            {% if not v.pulled %}
+              <form method="post" action="/updates/pull" style="display:inline"
+                    data-loading="{{ t('updates.downloading_the_factorio_image') }}"
+                    data-loading-hint="{{ t('updates.new_images_are_about_600_mb_and_usually') }}">
+                <input type="hidden" name="version" value="{{ v.version }}">
+                <button type="submit" class="btn btn-sm btn-primary"
+                        title="docker pull {{ image }}:{{ v.version }}">{{ t('docker.download') }}</button>
+              </form>
+            {% else %}
+              <form method="post" action="/updates/remove" style="display:inline"
+                    data-loading="{{ t('updates.removing_the_image') }}"
+                    data-confirm="{{ t('factorio_images.delete_confirm', image=image ~ ':' ~ v.version) }}">
+                <input type="hidden" name="version" value="{{ v.version }}">
+                <button type="submit" class="btn btn-sm btn-danger"
+                        title="docker image rm {{ image }}:{{ v.version }}">{{ t('updates.remove') }}</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="muted small" style="margin-top:16px">
+  {{ t('updates.docker_pulls_a_missing_tag_the_first_time') }}
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const filter = document.getElementById('updates-filter');
+  const groups = document.querySelectorAll('#updates-groups .updates-group');
+  if (!filter) return;
+  filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    groups.forEach(g => {
+      let visibleRows = 0;
+      g.querySelectorAll('tbody tr').forEach(tr => {
+        const ver = (tr.dataset.version || '').toLowerCase();
+        const show = !q || ver.includes(q);
+        tr.style.display = show ? '' : 'none';
+        if (show) visibleRows++;
+      });
+      // Группа видна, если есть совпавшие строки или совпала ветка
+      const minor = (g.dataset.minor || '').toLowerCase();
+      const groupMatch = !q || minor.includes(q);
+      const anyVisible = visibleRows > 0 || groupMatch;
+      g.style.display = anyVisible ? '' : 'none';
+      // Раскрываем группу автоматически если поиск её сматчил
+      if (q && anyVisible) g.open = true;
+    });
+  });
+})();
+</script>
+{% endblock %}

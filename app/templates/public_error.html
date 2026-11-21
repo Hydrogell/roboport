@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="{{ locale_code }}" dir="{{ locale_dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} — Roboport</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ static_v }}">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card">
+      <h1 class="login-title">{{ title }}</h1>
+      {% if detail %}<p class="login-hint">{{ detail }}</p>{% endif %}
+      <a class="btn btn-primary" href="/login">{{ t('login.sign_in') }}</a>
+    </section>
+  </main>
+</body>
+</html>

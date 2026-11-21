@@ -1,0 +1,11 @@
+{# Live-fragment для polling'а: оба обновляемых блока в одном ответе.
+   JS на dashboard.html парсит этот HTML и заменяет innerHTML двух
+   контейнеров dash-stats-grid и dash-tbody.
+
+   tbody обёрнут в фиктивный <table> чтобы браузерный HTML-парсер не
+   потерял его при parseFromString — без table-обёртки tbody/tr становятся
+   text-nodes в стандартном parser'е. #}
+{% include "_partials/dashboard_stats.html" %}
+<table style="display:none"><!-- wrapper для корректного парсинга tbody -->
+{% include "_partials/dashboard_tbody.html" %}
+</table>

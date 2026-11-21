@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+Babel>=2.14,<3
+python-multipart>=0.0.9
+# Хост-метрики на дашборде (CPU/MEM). Без неё на Linux читаем /proc/stat,
+# на Windows карточка хоста показывает «—». Опционально, но рекомендуется.
+psutil>=5.9
+# QR-код для 2FA-setup. SVG-генератор без зависимостей от Pillow
+# (используем qrcode.image.svg.SvgImage).
+qrcode>=7.4

@@ -1,0 +1,43 @@
+<section class="settings-section">
+  <div class="settings-body">
+    <div class="settings-update-head">
+      <h2>{{ t('settings.audit.audit_log') }}</h2>
+      <span class="setting-value" id="audit-summary">{{ t('settings.audit_count', count=audit_filter.total) }}{% if audit_filter.pages > 1 %} · {{ audit_filter.page }} / {{ audit_filter.pages }}{% endif %}</span>
+    </div>
+    <form method="get" action="/settings#audit" class="settings-filters">
+      <label class="field">
+        <span class="field-label">{{ t('settings.audit.event') }}</span>
+        <select name="audit_kind" class="input">
+          <option value="">{{ t('settings.audit.all_events') }}</option>
+          {% for g in audit_filter.kind_groups %}
+            <option value="{{ g }}" {% if audit_filter.kind == g %}selected{% endif %}>{{ g }}.*</option>
+          {% endfor %}
+          <optgroup label="{{ t('settings.event_types') }}">
+            {% for k in audit_filter.kinds %}
+              <option value="{{ k }}" {% if audit_filter.kind == k %}selected{% endif %}>{{ k }}</option>
+            {% endfor %}
+          </optgroup>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">{{ t('audit_table.server') }}</span>
+        <select name="audit_server" class="input">
+          <option value="">{{ t('dashboard.all_servers') }}</option>
+          <option value="__none__" {% if audit_filter.server == '__none__' %}selected{% endif %}>{{ t('settings.audit.panel_events') }}</option>
+          {% for s in audit_filter.servers %}
+            <option value="{{ s.uuid }}" {% if audit_filter.server == s.uuid %}selected{% endif %}>{{ s.name or (s.uuid[:8] ~ '…') }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">{{ t('settings.audit.per_page') }}</span>
+        <select name="audit_per" class="input">
+          {% for n in [10, 25, 50, 100] %}<option value="{{ n }}" {% if audit_filter.per == n %}selected{% endif %}>{{ n }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="btn">{{ t('settings.access.apply') }}</button>
+      {% if audit_filter.kind or audit_filter.server %}<a href="/settings#audit" class="btn">{{ t('settings.audit.reset') }}</a>{% endif %}
+    </form>
+    <div class="settings-table">{% include "_partials/audit_table.html" %}</div>
+  </div>
+</section>

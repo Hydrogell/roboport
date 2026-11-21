@@ -1,0 +1,171 @@
+{# Игроки: онлайн + админы + whitelist слева, баны справа.
+   Все действия идут через RCON когда сервер запущен и через прямую правку
+   server-{adminlist,whitelist,banlist}.json когда стоит. Кик в офлайне нет. #}
+
+<div class="players-wrap">
+
+  {% if players_msg %}
+  <div class="alert alert-ok">{{ players_msg }}</div>
+  {% endif %}
+  {% if players_err %}
+  <div class="alert alert-err">{{ players_err }}</div>
+  {% endif %}
+
+  <div class="muted small" style="margin-bottom:12px">
+    {% if players_can_rcon %}
+      {{ t('server_tabs.players.while_the_server_is_running_actions_go_through') }}
+    {% else %}
+      {{ t('players.offline_edits_hint', admins='server-adminlist.json',
+           allowlist='server-whitelist.json', bans='server-banlist.json') }}
+    {% endif %}
+    ·
+    {{ t('players.allowlist_label') }}
+    {% if players_whitelist_enabled %}
+      <span class="status status-online">{{ t('players.enabled') }}</span>
+    {% else %}
+      <span class="status status-offline">{{ t('players.disabled') }}</span>
+      <a href="/servers/{{ server.uuid }}/config" class="link">{{ t('players.allowlist_settings_link') }}</a>
+    {% endif %}
+  </div>
+
+  <div class="players-grid">
+
+    {# ---------- Левая колонка: игроки ---------- #}
+    <section class="card">
+      <div class="card-head">
+        <span class="card-head-title">{{ t('server_tabs.players.players_players_rows', players_rows=(players_rows|length)) }}</span>
+
+        <form method="post" class="inline-form"
+              title="{{ t('players.add_a_name_as_an_admin_or_as') }}">
+          <input type="text" name="name" class="input input-sm" placeholder="{{ t('players.name') }}" maxlength="40" required
+                 pattern="[A-Za-z0-9._\-]+">
+          <button type="submit" class="btn btn-sm"
+                  formaction="/servers/{{ server.uuid }}/players/promote">{{ t('players.add_admin_button') }}</button>
+          <button type="submit" class="btn btn-sm"
+                  formaction="/servers/{{ server.uuid }}/players/wl-add">{{ t('players.player') }}</button>
+        </form>
+      </div>
+      <div class="card-body">
+        {% if not players_rows %}
+          <div class="empty-state">
+            {{ t('server_tabs.players.no_players_yet_add_an_admin_above_or') }}
+          </div>
+        {% else %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{{ t('players.player_label') }}</th>
+              <th>{{ t('players.status') }}</th>
+              <th class="actions-col">{{ t('players.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in players_rows %}
+            <tr>
+              <td>
+                <span class="file-name mono">{{ p.name }}</span>
+                {% if p.is_admin %}<span class="badge badge-admin">★ {{ t('players.admin_role') }}</span>{% endif %}
+                {% if p.is_whitelist %}<span class="badge">{{ t('players.on_allowlist_badge') }}</span>{% endif %}
+              </td>
+              <td>
+                {% if p.online %}
+                  <span class="status status-online">{{ t('players.online') }}</span>
+                {% else %}
+                  <span class="status status-offline">{{ t('players.offline') }}</span>
+                {% endif %}
+              </td>
+              <td class="actions">
+                {% if p.is_admin %}
+                  <form method="post" action="/servers/{{ server.uuid }}/players/demote" style="display:inline">
+                    <input type="hidden" name="name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-sm" title="{{ t('players.remove_admin_privileges') }}">{{ t('players.remove_admin_button') }}</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="/servers/{{ server.uuid }}/players/promote" style="display:inline">
+                    <input type="hidden" name="name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-sm" title="{{ t('players.make_admin') }}">{{ t('players.make_admin_button') }}</button>
+                  </form>
+                {% endif %}
+
+                {% if p.is_whitelist %}
+                  <form method="post" action="/servers/{{ server.uuid }}/players/wl-remove" style="display:inline">
+                    <input type="hidden" name="name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-sm" title="{{ t('players.remove_from_the_allowlist') }}">{{ t('players.remove_allowlist_button') }}</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="/servers/{{ server.uuid }}/players/wl-add" style="display:inline">
+                    <input type="hidden" name="name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-sm" title="{{ t('players.add_to_the_allowlist') }}">{{ t('players.add_allowlist_button') }}</button>
+                  </form>
+                {% endif %}
+
+                <form method="post" action="/servers/{{ server.uuid }}/players/kick" style="display:inline"
+                      data-prompt="{{ t('players.kick_reason_optional') }}" data-prompt-field="reason">
+                  <input type="hidden" name="name" value="{{ p.name }}">
+                  <input type="hidden" name="reason" value="">
+                  <button type="submit" class="btn btn-sm btn-danger" title="{{ t('players.kick') }}"
+                    {% if not p.online %}disabled{% endif %}>{{ t('players.kick') }}</button>
+                </form>
+
+                <form method="post" action="/servers/{{ server.uuid }}/players/ban" style="display:inline"
+                      data-prompt="{{ t('players.ban_reason_optional') }}" data-prompt-field="reason"
+                      data-confirm="{{ t('players.ban_confirm', name=p.name) }}">
+                  <input type="hidden" name="name" value="{{ p.name }}">
+                  <input type="hidden" name="reason" value="">
+                  <button type="submit" class="btn btn-sm btn-danger" title="{{ t('players.ban') }}">{{ t('players.ban') }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </section>
+
+    {# ---------- Правая колонка: баны ---------- #}
+    <section class="card">
+      <div class="card-head">
+        <span class="card-head-title">{{ t('server_tabs.players.banned_players_players_bans', players_bans=(players_bans|length)) }}</span>
+
+        <form method="post" action="/servers/{{ server.uuid }}/players/ban" class="inline-form"
+              data-prompt="{{ t('players.ban_reason_optional_message') }}" data-prompt-field="reason">
+          <input type="text" name="name" class="input input-sm" placeholder="{{ t('players.name_hint') }}" maxlength="40" required
+                 pattern="[A-Za-z0-9._\-]+">
+          <input type="hidden" name="reason" value="">
+          <button type="submit" class="btn btn-sm btn-danger">{{ t('players.add_ban_button') }}</button>
+        </form>
+      </div>
+      <div class="card-body">
+        {% if not players_bans %}
+          <div class="empty-state">{{ t('players.the_ban_list_is_empty') }}</div>
+        {% else %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{{ t('players.player_2') }}</th>
+              <th>{{ t('players.reason') }}</th>
+              <th class="actions-col">{{ t('players.actions_label') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in players_bans %}
+            <tr>
+              <td><span class="file-name mono">{{ b.name }}</span></td>
+              <td class="muted small">{{ b.reason or '—' }}</td>
+              <td class="actions">
+                <form method="post" action="/servers/{{ server.uuid }}/players/unban" style="display:inline">
+                  <input type="hidden" name="name" value="{{ b.name }}">
+                  <button type="submit" class="btn btn-sm">{{ t('players.unban') }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </section>
+
+  </div>
+</div>

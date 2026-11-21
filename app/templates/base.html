@@ -1,0 +1,176 @@
+{% from '_partials/_macros.html' import toolbar_icon with context -%}
+<!doctype html>
+<html lang="{{ locale_code }}" dir="{{ locale_dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="author" content="Gellou">
+  <meta name="description" content="{{ t('app.panel_description') }}">
+  <title>{% block title %}Roboport{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ static_v }}">
+  {% include '_partials/locale_head.html' %}
+  {% block page_styles %}{% endblock %}
+  <script nonce="{{ csp_nonce }}">
+    // Применяем сохранённую тему/streamer-mode ДО рендера, иначе мерцает
+    // (flash of unthemed content / IP проявляется на миг до блюра).
+    (function () {
+      try {
+        var t = localStorage.getItem('roboport.theme');
+        if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+        if (localStorage.getItem('roboport.streamer') === '1')
+          document.documentElement.classList.add('streamer-mode');
+        if (localStorage.getItem('roboport.nav.compact') === '1')
+          document.documentElement.classList.add('sidebar-compact');
+      } catch (e) {}
+    })();
+    // CSRF token из сессии. Используется JS-обработчиками ниже.
+    window.__csrf = "{{ csrf_token }}";
+  </script>
+  <script defer nonce="{{ csp_nonce }}" src="{{ url_for('static', path='js/navigation.js') }}?v={{ static_v }}"></script>
+</head>
+<body>
+
+<div class="layout">
+
+  <aside class="sidebar" id="panel-navigation">
+    <div class="brand" title="Roboport Controller">
+      <div class="brand-logo">R</div>
+      <div class="brand-text">
+        <div class="brand-title">ROBOPORT</div>
+        <div class="brand-sub">controller</div>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="{{ t('nav.panel_navigation') }}">
+      <a href="/" class="nav-item {% if page == 'dashboard' %}active{% endif %}" title="{{ t('nav.panel') }}"
+         {% if page == 'dashboard' %}aria-current="page"{% endif %}>
+        <span class="nav-icon" aria-hidden="true">▦</span><span class="nav-label">{{ t('nav.panel') }}</span>
+      </a>
+
+      <div class="nav-group {% if page in ['servers', 'server_new', 'server'] %}open{% endif %}">
+        <button type="button" class="nav-item nav-group-head" title="{{ t('nav.servers') }}" aria-controls="nav-servers"
+                aria-expanded="{% if page in ['servers', 'server_new', 'server'] %}true{% else %}false{% endif %}">
+          <span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">{{ t('nav.servers') }}</span><span class="caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="nav-group-body" id="nav-servers">
+          <a href="/servers/new" class="nav-item nav-sub {% if page == 'server_new' %}active{% endif %}"
+             {% if page == 'server_new' %}aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">＋</span><span class="nav-label">{{ t('nav.new_server') }}</span>
+          </a>
+          {% for s in sidebar_servers %}
+          {% set current = page == 'server' and server.uuid == s.uuid %}
+          <a href="/servers/{{ s.uuid }}" class="nav-item nav-sub {% if current %}active{% endif %}" title="{{ s.name }}"
+             {% if current %}aria-current="page"{% endif %}>
+            <span class="nav-icon" aria-hidden="true">▸</span><span class="nav-label">{{ s.name }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <a href="/updates" class="nav-item {% if page == 'updates' %}active{% endif %}" title="{{ t('nav.factorio_versions') }}"
+         {% if page == 'updates' %}aria-current="page"{% endif %}>
+        <span class="nav-icon" aria-hidden="true">↻</span><span class="nav-label">{{ t('nav.factorio_versions') }}</span>
+      </a>
+      <a href="/settings" class="nav-item {% if page == 'settings' %}active{% endif %}" title="{{ t('nav.settings') }}"
+         {% if page == 'settings' %}aria-current="page"{% endif %}>
+        <span class="nav-icon" aria-hidden="true">✱</span><span class="nav-label">{{ t('nav.settings') }}</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <span class="version-badge">v{{ panel_version }}</span>
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" aria-hidden="true"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="topbar-collapse" type="button" aria-controls="panel-navigation" aria-expanded="true"
+              aria-label="{{ t('nav.collapse_menu') }}" title="{{ t('nav.collapse_menu') }}">«</button>
+      <div class="topbar-spacer"><span class="streamer-indicator" title="{{ t('account.streamer_mode') }}">{{ toolbar_icon('eye') }}<span>{{ t('account.streamer_mode') }}</span></span></div>
+      <div class="topbar-actions">
+        {% block language_picker %}{% include '_partials/locale_picker.html' %}{% endblock %}
+        <div class="notif-wrap">
+          <button class="topbar-btn" id="notif-btn" type="button"
+                  title="{{ t('topbar.notifications') }}" aria-label="{{ t('topbar.notifications') }}"
+                  aria-haspopup="dialog" aria-controls="notif-pop" aria-expanded="false">
+            {{ toolbar_icon('bell') }}
+            <span class="notif-dot" id="notif-dot" hidden></span>
+          </button>
+          <div class="notif-pop" id="notif-pop" hidden role="dialog" aria-label="{{ t('topbar.notifications') }}">
+            <div class="notif-head">
+              <span>{{ t('topbar.events_24h') }}</span>
+              <span class="muted small" id="notif-online">—</span>
+            </div>
+            <div class="notif-body" id="notif-body">
+              <div class="muted small" style="padding:14px">{{ t('topbar.loading') }}</div>
+            </div>
+          </div>
+        </div>
+
+        <details class="account-menu" id="account-menu">
+          <summary class="account-trigger" aria-controls="account-popover"
+                   aria-label="{{ t('account.menu') }}{% if current_user %} · {{ current_user.username }}{% endif %}"
+                   title="{{ t('account.menu') }}">
+            {% if current_user %}
+              <span class="account-avatar" aria-hidden="true">{{ current_user.username[:1] | upper }}</span>
+              <span class="account-name">{{ current_user.username }}</span>
+            {% else %}
+              {{ toolbar_icon('user') }}
+            {% endif %}
+            <span class="account-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="account-popover" id="account-popover">
+            {% if current_user %}
+              <a class="account-action" href="/settings#account-name">
+                {{ toolbar_icon('edit') }}<span>{{ t('account.change_username') }}</span>
+              </a>
+            {% endif %}
+            <button class="account-action" type="button" id="theme-btn" aria-pressed="false">
+              {{ toolbar_icon('sun') }}<span>{{ t('account.light_theme') }}</span><span class="account-switch" aria-hidden="true"></span>
+            </button>
+            <button class="account-action" type="button" id="streamer-btn" aria-pressed="false">
+              {{ toolbar_icon('eye') }}<span>{{ t('account.streamer_mode') }}</span><span class="account-switch" aria-hidden="true"></span>
+            </button>
+            {% if current_user %}
+              <form class="account-signout" method="post" action="/logout">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button class="account-action" type="submit">{{ toolbar_icon('logout') }}<span>{{ t('topbar.sign_out') }}</span></button>
+              </form>
+            {% endif %}
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- Loading overlay — общий для всех долгих form-submit'ов.
+         Перехват в JS (нижe) показывает его автоматически. -->
+    <div class="loading-overlay" id="loading-overlay" role="dialog" aria-live="polite">
+      <div class="loading-card">
+        <div class="lc-spinner"></div>
+        <div class="lc-title" id="lc-title">{{ t('loading.processing') }}</div>
+        <div class="lc-hint" id="lc-hint">{{ t('loading.wait') }}</div>
+        <ul class="lc-steps" id="lc-steps" hidden></ul>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <span>© 2026 <a href="https://github.com/Hydrogell" target="_blank" rel="noopener" class="muted">Gellou</a></span>
+      <span class="footer-separator muted" aria-hidden="true">·</span>
+      <span class="muted">{{ t('footer.product_description') }}</span>
+      <a class="muted" href="{{ url_for('static', path='licenses.html') }}">{{ t('footer.licenses') }}</a>
+      <span class="muted small" id="sampler-status" title="{{ t('footer.metrics_sample_hint') }}"></span>
+    </footer>
+  </div>
+
+</div>
+
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', path='js/shell.js') }}?v={{ static_v }}"></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', path='js/notifications.js') }}?v={{ static_v }}"></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', path='js/forms.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

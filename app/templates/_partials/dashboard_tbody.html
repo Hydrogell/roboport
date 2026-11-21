@@ -1,0 +1,64 @@
+{# Тело таблицы серверов на дашборде. Контейнер id='dash-tbody' — JS свопает
+   innerHTML при live-polling. Источник правды для full-page и для fragment'а. #}
+{% import "_partials/_macros.html" as m %}
+<tbody id="dash-tbody">
+  {% if servers %}
+  {% for s in servers %}
+  {% set running = s.state == 'running' %}
+  {% set starting = s.state == 'starting' %}
+  <tr class="dashboard-server-row" data-server-uuid="{{ s.uuid }}">
+    <td class="dashboard-server-name">
+      <a href="/servers/{{ s.uuid }}" class="link">{{ s.name }}</a>
+      <div class="muted small">v{{ s.version }} · :{{ s.port }}/udp</div>
+    </td>
+    <td class="actions dashboard-server-actions">
+      <form method="post" action="/servers/{{ s.uuid }}/start">
+        <button type="submit" class="icon-btn" title="{{ t('dashboard_tbody.start') }}" aria-label="{{ t('dashboard_tbody.start') }}"
+          {% if running or starting %}disabled{% endif %}>▶</button>
+      </form>
+      <form method="post" action="/servers/{{ s.uuid }}/restart">
+        <button type="submit" class="icon-btn" title="{{ t('dashboard_tbody.restart') }}" aria-label="{{ t('dashboard_tbody.restart') }}"
+          {% if not running %}disabled{% endif %}>↻</button>
+      </form>
+      <form method="post" action="/servers/{{ s.uuid }}/stop">
+        <button type="submit" class="icon-btn danger" title="{{ t('dashboard_tbody.stop') }}" aria-label="{{ t('dashboard_tbody.stop') }}"
+          {% if not running %}disabled{% endif %}>■</button>
+      </form>
+    </td>
+    <td class="dashboard-server-cpu" data-label="CPU">
+      {% if running and s.cpu_pct is not none %}
+        <div style="display:flex;align-items:center;gap:6px">
+          <span>{{ '%.1f'|format(s.cpu_pct) }}%</span>
+          {{ m.spark(s.cpu_spark, color='#ff8c1a') }}
+        </div>
+        <div class="muted" style="font-size:10px">{{ t('dashboard_tbody.over_30_min') }}</div>
+      {% else %}<span class="muted small">—</span>{% endif %}
+    </td>
+    <td class="dashboard-server-memory" data-label="{{ t('dashboard.memory') }}">
+      {% if running and s.mem_pct is not none %}
+        <div style="display:flex;align-items:center;gap:6px">
+          <span>{{ '%.1f'|format(s.mem_pct) }}%</span>
+          {{ m.spark(s.mem_spark, color='#ffc933') }}
+        </div>
+        <div class="muted" style="font-size:10px">{{ t('dashboard_tbody.over_30_min_label') }}</div>
+      {% else %}<span class="muted small">—</span>{% endif %}
+    </td>
+    <td class="dashboard-server-players" data-label="{{ t('dashboard.players') }}">
+      {% if running %}{{ s.players_online }}/{% if s.max_players and s.max_players > 0 %}{{ s.max_players }}{% else %}∞{% endif %}
+      {% else %}<span class="muted small">—</span>{% endif %}
+    </td>
+    <td class="dashboard-server-status">
+      {% if running %}<span class="status status-online">{{ t('dashboard_tbody.online') }}</span>
+      {% elif starting %}<span class="status status-online">{{ t('dashboard_tbody.starting') }}</span>
+      {% elif s.state == 'docker_err' %}<span class="status status-error">{{ t('dashboard.docker_error_label') }}</span>
+      {% elif s.state == 'unknown' %}<span class="status status-error">?</span>
+      {% else %}<span class="status status-offline">{{ t('dashboard_tbody.offline') }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  {% else %}
+  <tr><td colspan="6" class="empty-state">
+    {{ t('partials.dashboard_tbody.no_servers_yet') }} <a href="/servers/new" class="link">{{ t('dashboard_tbody.create_your_first_server') }}</a>.
+  </td></tr>
+  {% endif %}
+</tbody>

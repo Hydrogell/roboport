@@ -1,0 +1,669 @@
+{# Файловый менеджер: листинг + sort/select/upload/mkdir/download/delete/zip-download.
+   Все пути жёстко ограничены servers/<uuid>/ через safe_resolve в роуте. #}
+
+<div class="files-wrap" id="files-tab" data-cwd="{{ files_path }}">
+
+  <nav class="breadcrumbs">
+    {% for c in files_crumbs %}
+      {% if loop.last %}
+        <span class="crumb crumb-current">{{ c.name }}</span>
+      {% else %}
+        <a class="crumb" href="/servers/{{ server.uuid }}/files?path={{ c.path }}">{{ c.name }}</a>
+        <span class="crumb-sep">/</span>
+      {% endif %}
+    {% endfor %}
+    <span class="muted small" style="margin-left:auto">{{ t('files.current_path', path='/' ~ files_path) }}</span>
+  </nav>
+
+  <div class="files-toolbar">
+    {% if not files_at_root %}
+      {% set up_path = files_crumbs[-2].path if files_crumbs|length >= 2 else '' %}
+      <a class="btn btn-sm" href="/servers/{{ server.uuid }}/files?path={{ up_path }}">{{ t('files.up') }}</a>
+    {% endif %}
+
+    <form method="post" action="/servers/{{ server.uuid }}/files/mkdir" class="inline-form">
+      <input type="hidden" name="path" value="{{ files_path }}">
+      <input type="text" name="name" class="input input-sm" placeholder="{{ t('files.new_folder') }}" maxlength="60" required>
+      <button type="submit" class="btn btn-sm">{{ t('files.folder') }}</button>
+    </form>
+
+    <form method="post" action="/servers/{{ server.uuid }}/files/upload"
+          enctype="multipart/form-data" class="inline-form">
+      <input type="hidden" name="path" value="{{ files_path }}">
+      <input type="file" name="file" class="input input-sm" required>
+      <button type="submit" class="btn btn-sm btn-primary">{{ t('files.upload') }}</button>
+    </form>
+
+    <label class="check-field" style="margin-left:auto"
+           title="{{ t('files.dotfiles_git_vscode_and_lock_tmp_temp') }}">
+      <input type="checkbox" id="show-system">
+      <span class="muted small">{{ t('files.show_system_files') }}</span>
+    </label>
+  </div>
+
+  {# Mobile keeps selection and sorting above the list. The desktop header
+     remains the source of truth for the existing sorting script. #}
+  {% if files_listing %}
+  <div class="file-mobile-controls">
+    <label class="check-field">
+      <input type="checkbox" class="cb-classic" id="sel-all-mobile">
+      <span>{{ t('files.select_all') }}</span>
+    </label>
+    <div class="file-sort-controls">
+      <button type="button" class="btn btn-sm" data-file-sort="name">{{ t('files.name') }}</button>
+      <button type="button" class="btn btn-sm" data-file-sort="size">{{ t('files.size') }}</button>
+      <button type="button" class="btn btn-sm" data-file-sort="mtime">{{ t('files.modified') }}</button>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Bulk-action bar: появляется когда есть выделение #}
+  <div class="bulk-bar" id="bulk-bar" hidden>
+    <span class="bulk-info" id="bulk-count">{{ t('files.selected_count', count=0) }}</span>
+    <div class="bulk-actions">
+      <form method="post" action="/servers/{{ server.uuid }}/files/zip-download" class="inline-form" id="bulk-zip">
+        <button type="submit" class="btn btn-sm">{{ t('files.download_zip') }}</button>
+      </form>
+      <form method="post" action="/servers/{{ server.uuid }}/files/bulk-delete" class="inline-form" id="bulk-del">
+        <input type="hidden" name="cwd" value="{{ files_path }}">
+        <button type="submit" class="btn btn-sm btn-danger">{{ t('files.delete_selected') }}</button>
+      </form>
+    </div>
+  </div>
+
+  {% if not files_listing %}
+    <div class="empty-state">{{ t('files.this_folder_is_empty') }}</div>
+  {% else %}
+  <table class="data-table files-table" id="files-table">
+    <thead>
+      <tr>
+        <th class="check-col">
+          <input type="checkbox" id="sel-all" title="{{ t('files.select_all') }}">
+        </th>
+        <th class="sortable" data-sort="name">{{ t('files.name') }}<span class="sort-arrow"></span></th>
+        <th class="sortable num" data-sort="size">{{ t('files.size') }}<span class="sort-arrow"></span></th>
+        <th class="sortable num" data-sort="mtime">{{ t('files.modified') }}<span class="sort-arrow"></span></th>
+        <th class="actions-col">{{ t('files.actions') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in files_listing %}
+      {% set child_path = (files_path ~ '/' if files_path else '') ~ e.name %}
+      {# Системные: только для файлов (не папок) — dotfile, .lock, .tmp, .temp.
+         Пометка чисто косметическая, server-side фильтрации нет. #}
+      {% set _ln = e.name|lower %}
+      {% set _is_sys = (not e.is_dir) and (
+            _ln.startswith('.') or _ln.endswith('.lock')
+            or _ln.endswith('.tmp') or _ln.endswith('.temp')
+         ) %}
+      <tr data-is-dir="{{ '1' if e.is_dir else '0' }}"
+          data-name="{{ e.name|lower }}"
+          data-size="{{ e.size or 0 }}"
+          data-mtime="{{ e.mtime }}"
+          data-system="{{ '1' if _is_sys else '0' }}"
+          {% if _is_sys %}class="file-row-system"{% endif %}>
+        <td class="check-col">
+          <label class="file-row-select">
+            <input type="checkbox" class="row-check" value="{{ child_path }}" aria-label="{{ e.name }}">
+          </label>
+        </td>
+        <td class="file-primary">
+          {% if e.is_dir %}
+            <a class="link file-row-link" href="/servers/{{ server.uuid }}/files?path={{ child_path }}">
+              <svg class="ico ico-folder" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M1.5 4.5a1 1 0 0 1 1-1h3.4a1 1 0 0 1 .8.4l.9 1.1a1 1 0 0 0 .8.4h4.6a1 1 0 0 1 1 1v6.6a1 1 0 0 1-1 1h-10.5a1 1 0 0 1-1-1z" fill="currentColor"/>
+              </svg>
+              <span class="file-name">{{ e.name }}</span>
+            </a>
+          {% elif e.is_text %}
+            <a class="link file-row-link" href="#"
+               data-action="edit" data-path="{{ child_path }}" data-name="{{ e.name }}"
+               data-size="{{ e.size_h }}" data-mtime="{{ e.mtime }}">
+              <svg class="ico ico-file" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" fill="currentColor" opacity=".22"/>
+                <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1zm6 0V5h3.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+              </svg>
+              <span class="file-name">{{ e.name }}</span>
+            </a>
+          {% else %}
+            <span class="file-row-link dim">
+              <svg class="ico ico-file" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" fill="currentColor" opacity=".18"/>
+                <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1zm6 0V5h3.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+              </svg>
+              <span class="file-name">{{ e.name }}</span>
+            </span>
+          {% endif %}
+        </td>
+        <td class="num" data-mobile-label="{{ t('files.size') }}">{{ e.size_h }}</td>
+        <td class="num muted" data-mobile-label="{{ t('files.modified') }}">{{ e.mtime }}</td>
+        <td class="actions">
+          {% if e.is_text %}
+          <a class="icon-btn" title="{{ t('files.edit') }}" href="#"
+             data-action="edit" data-path="{{ child_path }}" data-name="{{ e.name }}"
+             data-size="{{ e.size_h }}" data-mtime="{{ e.mtime }}">✎</a>
+          {% endif %}
+          {% if not e.is_dir %}
+          <a class="icon-btn" title="{{ t('files.download') }}"
+             href="/servers/{{ server.uuid }}/files/download?path={{ child_path }}">⬇</a>
+          {% endif %}
+          <form method="post" action="/servers/{{ server.uuid }}/files/delete" style="display:inline"
+                data-confirm="{{ t('files.delete_directory_confirm' if e.is_dir else 'files.delete_file_confirm', name=e.name) }}">
+            <input type="hidden" name="path" value="{{ child_path }}">
+            <button type="submit" class="icon-btn danger" title="{{ t('files.delete') }}">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="muted small" style="margin-top:12px">
+    {{ t('files.root_settings_hint', path='servers/' ~ server.uuid ~ '/', config='config/', mods='mods/') }}
+  </div>
+
+  {# ---------- Модалка редактора текста (Monaco) ---------- #}
+  <div id="editor-modal" class="modal" hidden aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title">
+          <svg class="ico ico-file" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" fill="currentColor" opacity=".22"/>
+            <path d="M3.25 1.5h6l3.5 3.5v9a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1zm6 0V5h3.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          </svg>
+          <span id="editor-filename" class="mono"></span>
+          <span id="editor-dirty" class="dirty-dot" hidden title="{{ t('files.unsaved_changes') }}">●</span>
+        </div>
+        <div class="modal-meta-strip muted small">
+          <span>{{ t('files.size_label') }} <span id="editor-size">—</span></span>
+          <span>{{ t('files.type') }} <span id="editor-type">—</span></span>
+          <span>{{ t('files.modified_label') }} <span id="editor-mtime">—</span></span>
+        </div>
+        <button class="modal-close" id="editor-close" type="button" aria-label="{{ t('files.close') }}" title="{{ t('files.close_esc') }}">✕</button>
+      </div>
+
+      <div class="editor-host" id="editor-host">
+        <div class="editor-loader muted">{{ t('files.loading_editor') }}</div>
+      </div>
+
+      <div class="modal-foot">
+        <span class="modal-status" id="editor-status">&nbsp;</span>
+        <div class="modal-actions">
+          <button class="btn" id="editor-cancel" type="button">{{ t('files.cancel') }}</button>
+          <button class="btn btn-primary" id="editor-save" type="button" disabled>{{ t('files.save_ctrl_s') }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // ---------- Monaco lazy-loader (CDN-first) ----------
+  const MONACO_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs';
+  const MONACO_TIMEOUT_MS = 8000;
+
+  // Monaco пытается запустить language-workers как Web Workers. На CDN-сценарии
+  // worker не может быть same-origin — Monaco падает с ошибкой "Could not
+  // create web worker". Решение: сами создаём blob: worker, который
+  // importScripts'ит workerMain.js с CDN.
+  window.MonacoEnvironment = {
+    getWorkerUrl: function (_moduleId, _label) {
+      const code = `
+        self.MonacoEnvironment = { baseUrl: '${MONACO_BASE}/' };
+        importScripts('${MONACO_BASE}/base/worker/workerMain.js');
+      `;
+      return URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    },
+  };
+
+  let monacoPromise = null;
+  function ensureMonaco() {
+    if (monacoPromise) return monacoPromise;
+    const load = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = MONACO_BASE + '/loader.js';
+      s.onload = () => {
+        // eslint-disable-next-line no-undef
+        require.config({ paths: { vs: MONACO_BASE } });
+        // eslint-disable-next-line no-undef
+        require(['vs/editor/editor.main'], () => resolve(window.monaco));
+      };
+      s.onerror = () => reject(new Error(window.rpT('files.could_not_load_the_monaco_loader_js')));
+      document.head.appendChild(s);
+    });
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(window.rpT('files.monaco_timed_out_waiting_for_the_cdn'))), MONACO_TIMEOUT_MS);
+    });
+    monacoPromise = Promise.race([load, timeout]).catch(err => {
+      monacoPromise = null;  // дать шанс ещё раз попробовать на след. файле
+      throw err;
+    });
+    return monacoPromise;
+  }
+
+  // ---------- CodeMirror fallback (локальный, MIT, ~580KB) ----------
+  // Загружается только если Monaco не доступен (offline / CDN режется).
+  // Bundle: lib/codemirror + matchbrackets + closebrackets + active-line +
+  // modes (js/json, lua, yaml, py, md, sh, properties, dockerfile,
+  // htmlmixed=xml+css+js).
+  let cmPromise = null;
+  function ensureCodeMirror() {
+    if (cmPromise) return cmPromise;
+    cmPromise = new Promise((resolve, reject) => {
+      // Сначала CSS
+      const cssBase = document.createElement('link');
+      cssBase.rel = 'stylesheet';
+      cssBase.href = '/static/vendor/codemirror/lib/codemirror.css';
+      document.head.appendChild(cssBase);
+      const cssTheme = document.createElement('link');
+      cssTheme.rel = 'stylesheet';
+      cssTheme.href = '/static/vendor/codemirror/theme/material-darker.css';
+      document.head.appendChild(cssTheme);
+      // Затем JS bundle
+      const s = document.createElement('script');
+      s.src = '/static/vendor/codemirror/cm-bundle.js?v={{ static_v }}';
+      s.nonce = '{{ csp_nonce }}';
+      s.onload = () => {
+        if (window.CodeMirror) resolve(window.CodeMirror);
+        else reject(new Error(window.rpT('files.codemirror_loaded_but_window_codemirror_is_missing')));
+      };
+      s.onerror = () => reject(new Error(window.rpT('files.could_not_load_the_codemirror_bundle_vendor_codemirror')));
+      document.head.appendChild(s);
+    });
+    return cmPromise;
+  }
+
+  // Маппинг Monaco-language → CodeMirror mode
+  function cmMode(lang) {
+    const map = {
+      json: { name: 'javascript', json: true },
+      javascript: 'javascript',
+      yaml: 'yaml', lua: 'lua', python: 'python',
+      markdown: 'markdown', shell: 'shell', properties: 'properties',
+      dockerfile: 'dockerfile', html: 'htmlmixed', css: 'css',
+      ini: 'properties',
+    };
+    return map[lang] || null;
+  }
+
+  // ---------- Языки по расширению/имени ----------
+  const LANG_MAP = {
+    json: 'json', jsonc: 'json',
+    toml: 'plaintext', // monaco-toml бывает не во всех сборках; word-suggestions всё равно работают
+    yaml: 'yaml', yml: 'yaml',
+    properties: 'properties',
+    ini: 'ini', cfg: 'ini', conf: 'ini', env: 'ini',
+    md: 'markdown',
+    lua: 'lua', py: 'python', js: 'javascript', css: 'css', html: 'html',
+    sh: 'shell',
+    log: 'plaintext', txt: 'plaintext',
+  };
+  const NAME_LANG = { Dockerfile: 'dockerfile', Makefile: 'makefile' };
+  function detectLang(name) {
+    if (NAME_LANG[name]) return NAME_LANG[name];
+    const dot = name.lastIndexOf('.');
+    if (dot < 0) return 'plaintext';
+    return LANG_MAP[name.slice(dot + 1).toLowerCase()] || 'plaintext';
+  }
+
+  // ---------- Modal state ----------
+  const uuid = "{{ server.uuid }}";
+  const modal = document.getElementById('editor-modal');
+  const fileEl = document.getElementById('editor-filename');
+  const sizeEl = document.getElementById('editor-size');
+  const typeEl = document.getElementById('editor-type');
+  const mtimeEl = document.getElementById('editor-mtime');
+  const dirtyEl = document.getElementById('editor-dirty');
+  const statusEl = document.getElementById('editor-status');
+  const saveBtn = document.getElementById('editor-save');
+  const cancelBtn = document.getElementById('editor-cancel');
+  const closeBtn = document.getElementById('editor-close');
+  const host = document.getElementById('editor-host');
+
+  // Адаптер: { kind, getValue, setValue, setLanguage, focus }
+  // Создаётся один раз при первом открытии. Какой backend будет — Monaco или
+  // CodeMirror — решается в createEditorAdapter() с try/fallback.
+  let adapter = null;
+  let currentPath = null;
+  let originalContent = '';
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text || ' ';
+    statusEl.className = 'modal-status' + (kind ? ' status-' + kind : '');
+  }
+
+  function setDirty(on) {
+    dirtyEl.hidden = !on;
+    saveBtn.disabled = !on;
+  }
+
+  async function openEditor(path, name, sizeH, mtime) {
+    currentPath = path;
+    fileEl.textContent = name;
+    sizeEl.textContent = sizeH;
+    typeEl.textContent = detectLang(name);
+    mtimeEl.textContent = mtime;
+    setStatus('');
+    setDirty(false);
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+
+    let content;
+    try {
+      const r = await fetch(`/servers/${uuid}/files/text?path=${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()) || window.rpT('files.error')}`);
+      content = await r.text();
+    } catch (e) {
+      host.innerHTML = `<div class="alert-pre">${window.rpTHtml('files.editor_open_failed', {error: e.message})}</div>`;
+      return;
+    }
+    originalContent = content;
+
+    if (!adapter) {
+      adapter = await createEditorAdapter(content, detectLang(name));
+    } else {
+      adapter.setLanguage(detectLang(name));
+      adapter.setValue(content);
+    }
+    adapter.focus();
+  }
+
+  function getEditorPref() {
+    try { return localStorage.getItem('roboport.editor') || 'auto'; }
+    catch { return 'auto'; }
+  }
+
+  async function createEditorAdapter(initialContent, initialLang) {
+    // Учитываем preference из /settings → 🔌 Интеграции → Редактор файлов:
+    //   'auto'       — текущая логика (Monaco → CodeMirror на ошибке)
+    //   'monaco'     — без fallback, ошибка показывается в host
+    //   'codemirror' — сразу CodeMirror, Monaco не трогаем
+    const pref = getEditorPref();
+
+    if (pref === 'codemirror') {
+      return await makeCodeMirrorAdapter(initialContent, initialLang);
+    }
+
+    // Сначала пытаемся Monaco. На таймауте/CSP/offline — падаем на CodeMirror
+    // (если pref='auto'). При pref='monaco' ошибка пробрасывается выше.
+    try {
+      const monaco = await ensureMonaco();
+      host.innerHTML = '';
+      const ed = monaco.editor.create(host, {
+        value: initialContent,
+        language: initialLang,
+        theme: 'vs-dark',
+        automaticLayout: true,
+        minimap: { enabled: true, scale: 1 },
+        fontSize: 13,
+        tabSize: 2,
+        renderWhitespace: 'selection',
+        wordBasedSuggestions: 'currentDocument',
+        occurrencesHighlight: 'singleFile',
+        bracketPairColorization: { enabled: true },
+        scrollBeyondLastLine: false,
+      });
+      ed.onDidChangeModelContent(() => {
+        setDirty(ed.getValue() !== originalContent);
+      });
+      ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => save());
+      return {
+        kind: 'monaco',
+        getValue: () => ed.getValue(),
+        setValue: v => ed.setValue(v),
+        setLanguage: lang => monaco.editor.setModelLanguage(ed.getModel(), lang),
+        focus: () => ed.focus(),
+      };
+    } catch (e) {
+      if (pref === 'monaco') {
+        // Юзер явно выбрал Monaco — без fallback'а. Показываем ошибку в host
+        // и пробрасываем — пусть видит что выбор требует интернета.
+        host.innerHTML = `<div class="alert-pre">${window.rpTHtml('files.editor_monaco_failed', {error: e.message})}</div>`;
+        throw e;
+      }
+      console.warn(window.rpT('files.editor_monaco_unavailable_using_codemirror'), e.message);
+      return await makeCodeMirrorAdapter(initialContent, initialLang);
+    }
+  }
+
+  async function makeCodeMirrorAdapter(initialContent, initialLang) {
+    const CM = await ensureCodeMirror();
+    host.innerHTML = '';
+    const ta = document.createElement('textarea');
+    host.appendChild(ta);
+    const cm = CM.fromTextArea(ta, {
+      mode: cmMode(initialLang),
+      theme: 'material-darker',
+      lineNumbers: true,
+      matchBrackets: true,
+      autoCloseBrackets: true,
+      styleActiveLine: true,
+      indentUnit: 2,
+      tabSize: 2,
+      lineWrapping: false,
+      extraKeys: {
+        'Ctrl-S': () => save(),
+        'Cmd-S': () => save(),
+      },
+    });
+    cm.setSize('100%', '100%');
+    cm.setValue(initialContent);
+    cm.on('change', () => setDirty(cm.getValue() !== originalContent));
+    // Бейдж в углу — какой движок активен. Auto/fallback показывает явно;
+    // для принудительного выбора тоже пишем «CodeMirror» — юзеру полезно
+    // подтверждение что pref сработал.
+    const badge = document.createElement('div');
+    badge.textContent = 'CodeMirror';
+    badge.style.cssText = 'position:absolute;top:6px;right:10px;font-size:10px;'
+      + 'color:rgba(255,200,140,.7);background:rgba(0,0,0,.4);padding:2px 6px;'
+      + 'border-radius:3px;pointer-events:none;z-index:5;font-family:monospace';
+    host.style.position = 'relative';
+    host.appendChild(badge);
+    return {
+      kind: 'codemirror',
+      getValue: () => cm.getValue(),
+      setValue: v => cm.setValue(v),
+      setLanguage: lang => cm.setOption('mode', cmMode(lang)),
+      focus: () => cm.focus(),
+    };
+  }
+
+  async function save() {
+    if (!adapter || !currentPath) return;
+    const content = adapter.getValue();
+    setStatus(window.rpT('files.saving'), 'pending');
+    saveBtn.disabled = true;
+    try {
+      const r = await fetch(`/servers/${uuid}/files/text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: currentPath, content }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        throw new Error(`HTTP ${r.status}: ${txt}`);
+      }
+      const data = await r.json();
+      originalContent = content;
+      sizeEl.textContent = data.size + ' B';
+      mtimeEl.textContent = data.mtime;
+      setStatus(window.rpT('files.saved'), 'ok');
+      setDirty(false);
+    } catch (e) {
+      setStatus(window.rpT('files.save_failed', {error: e.message}), 'err');
+      saveBtn.disabled = false;
+    }
+  }
+
+  function close() {
+    if (!dirtyEl.hidden) {
+      if (!confirm(window.rpT('files.close_and_discard_your_unsaved_changes'))) return;
+    }
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    currentPath = null;
+    setDirty(false);
+  }
+
+  // Перехватываем клики по edit-ссылкам
+  document.getElementById('files-tab').addEventListener('click', e => {
+    const a = e.target.closest('[data-action="edit"]');
+    if (!a) return;
+    e.preventDefault();
+    openEditor(a.dataset.path, a.dataset.name, a.dataset.size, a.dataset.mtime);
+  });
+
+  saveBtn.addEventListener('click', save);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+  // клик по затемнению (overlay) — закрыть
+  modal.addEventListener('mousedown', e => { if (e.target === modal) close(); });
+  // Esc
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !modal.hidden) close();
+  });
+})();
+</script>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const root = document.getElementById('files-tab');
+  if (!root) return;
+  const table = document.getElementById('files-table');
+  if (!table) return;
+
+  const tbody = table.querySelector('tbody');
+  const rows = () => Array.from(tbody.querySelectorAll('tr'));
+  const visibleBoxes = () => Array.from(tbody.querySelectorAll('tr:not([hidden]) .row-check'));
+
+  // ---------- Selection ----------
+  const bar = document.getElementById('bulk-bar');
+  const countEl = document.getElementById('bulk-count');
+  const selectAllControls = root.querySelectorAll('#sel-all, #sel-all-mobile');
+  const zipForm = document.getElementById('bulk-zip');
+  const delForm = document.getElementById('bulk-del');
+
+  function getSelectedPaths() {
+    return visibleBoxes().filter(b => b.checked).map(b => b.value);
+  }
+  delForm.addEventListener('submit', event => {
+    const count = getSelectedPaths().length;
+    if (!count || !window.confirm(window.rpT('files.bulk_delete_confirm', {count}))) event.preventDefault();
+  });
+  function refreshBulk() {
+    const paths = getSelectedPaths();
+    countEl.textContent = window.rpT('files.selected_count', {count: paths.length});
+    bar.hidden = paths.length === 0;
+    // master-чекбокс: indeterminate если выделено не всё
+    const total = visibleBoxes().length;
+    for (const control of selectAllControls) {
+      control.checked = total > 0 && paths.length === total;
+      control.indeterminate = paths.length > 0 && paths.length < total;
+    }
+
+    // переписать hidden inputs у форм массовых действий
+    [zipForm, delForm].forEach(f => {
+      f.querySelectorAll('input[name="paths"]').forEach(n => n.remove());
+      paths.forEach(p => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'paths'; inp.value = p;
+        f.appendChild(inp);
+      });
+    });
+  }
+  for (const control of selectAllControls) {
+    control.addEventListener('change', () => {
+      for (const box of visibleBoxes()) box.checked = control.checked;
+      refreshBulk();
+    });
+  }
+  tbody && tbody.addEventListener('change', e => {
+    if (e.target.classList.contains('row-check')) refreshBulk();
+  });
+
+  // ---------- Sorting ----------
+  // Папки всегда сверху; внутри каждой группы — сортировка по выбранной колонке.
+  const sortState = { key: 'name', dir: 1 };  // dir: 1 asc, -1 desc
+
+  function applySort() {
+    const arr = rows();
+    arr.sort((a, b) => {
+      const aDir = a.dataset.isDir === '1';
+      const bDir = b.dataset.isDir === '1';
+      if (aDir !== bDir) return aDir ? -1 : 1;  // папки всегда выше
+      const k = sortState.key;
+      let av = a.dataset[k], bv = b.dataset[k];
+      if (k === 'size') { av = +av; bv = +bv; return (av - bv) * sortState.dir; }
+      // строковое сравнение для name / mtime (mtime в формате YYYY-MM-DD HH:MM лекс. сортируется верно)
+      return av.localeCompare(bv) * sortState.dir;
+    });
+    arr.forEach(r => tbody.appendChild(r));
+    // отрисовать стрелки
+    table.querySelectorAll('th.sortable').forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      arrow.textContent = th.dataset.sort === sortState.key
+        ? (sortState.dir === 1 ? '▲' : '▼') : '';
+      th.classList.toggle('sorted', th.dataset.sort === sortState.key);
+      if (th.dataset.sort === sortState.key) th.setAttribute('aria-sort', sortState.dir === 1 ? 'ascending' : 'descending');
+      else th.removeAttribute('aria-sort');
+    });
+    root.querySelectorAll('[data-file-sort]').forEach(button => {
+      const active = button.dataset.fileSort === sortState.key;
+      button.setAttribute('aria-pressed', String(active));
+      button.dataset.direction = active ? (sortState.dir === 1 ? '▲' : '▼') : '';
+    });
+  }
+
+  table.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      if (sortState.key === k) sortState.dir = -sortState.dir;
+      else { sortState.key = k; sortState.dir = 1; }
+      applySort();
+    });
+  });
+  root.querySelectorAll('[data-file-sort]').forEach(button => {
+    button.addEventListener('click', () => {
+      table.querySelector(`th.sortable[data-sort="${button.dataset.fileSort}"]`)?.click();
+    });
+  });
+
+  applySort();
+  refreshBulk();
+
+  // ---------- Toggle системных файлов ----------
+  // Дефолт: скрыто. Состояние хранится в localStorage чтобы не сбрасывалось
+  // на каждой навигации. Скрытие чисто визуальное (display:none) — bulk-выбор
+  // и сортировка под капотом не меняются.
+  const sysToggle = document.getElementById('show-system');
+  if (sysToggle) {
+    const KEY = 'roboport.files.show-system';
+    const saved = localStorage.getItem(KEY);
+    sysToggle.checked = saved === '1';
+    function applySysFilter() {
+      const show = sysToggle.checked;
+      rows().forEach(r => {
+        if (r.dataset.system === '1') {
+          r.hidden = !show;
+          // Сбросим выбор у скрытых, чтобы они не попадали в bulk-action
+          if (!show) {
+            const cb = r.querySelector('.row-check');
+            if (cb && cb.checked) { cb.checked = false; }
+          }
+        }
+      });
+      refreshBulk();
+    }
+    sysToggle.addEventListener('change', () => {
+      localStorage.setItem(KEY, sysToggle.checked ? '1' : '0');
+      applySysFilter();
+    });
+    applySysFilter();
+  }
+})();
+</script>

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{# Reloading this receipt consumes the one-time key. #}
+{% block language_picker %}{% endblock %}
+{% block title %}{{ t('api_key_show.api_key_created_roboport') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('api_key_show.api_key_created') }}</h1>
+
+<section class="card" style="max-width:760px">
+  <div class="card-body">
+
+    <div class="alert alert-warn" style="margin-top:0">
+      <b>{{ t('api_key_show.this_is_the_only_time_roboport_will_show') }}</b>
+      {{ t('api_key_show.you_cannot_see_the_key_again_after_closing') }}
+    </div>
+
+    <table class="data-table" style="margin-bottom:14px">
+      <tbody>
+        <tr><th style="width:140px">{{ t('server_detail.name') }}</th><td><b>{{ name }}</b></td></tr>
+        <tr><th>{{ t('api_key_show.scopes') }}</th><td>
+          {% for s in scopes %}<code class="mono">{{ s }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+        </td></tr>
+        <tr><th>{{ t('settings.integrations.expires') }}</th><td>
+          {% if expires_at %}{{ expires_at | unixtime }}{% else %}<span class="muted">{{ t('api_key_show.no_expiry') }}</span>{% endif %}
+        </td></tr>
+      </tbody>
+    </table>
+
+    <div style="background:var(--bg-3, rgba(255,140,26,.08));
+                border:1px solid rgba(255,140,26,.55);
+                border-radius:8px; padding:14px 16px; margin:14px 0">
+      <div class="muted small" style="margin-bottom:8px">{{ t('api_key_show.api_key') }}</div>
+      <code id="plain-key" class="mono confidential"
+            style="display:block; font-size:14px; user-select:all; word-break:break-all;
+                   padding:8px 10px; background:rgba(0,0,0,.2); border-radius:4px">{{ plain }}</code>
+      <button type="button" class="btn btn-sm" id="btn-copy-key" style="margin-top:10px">
+        {{ t('api_key_show.copy') }}
+      </button>
+    </div>
+
+    <h3 style="font-size:14px; margin-top:18px">{{ t('api_key_show.how_to_use') }}</h3>
+    <p class="muted small" style="margin-bottom:8px">{{ t('api_key_show.send_the_key_in_either_header') }}</p>
+    {% set base = request.url.scheme ~ '://' ~ request.url.netloc %}
+    <pre style="background:var(--bg-2); padding:10px; border-radius:6px; overflow-x:auto; font-size:12px"><code class="mono"># {{ t('api_key_show.standard_oauth_style_header_preferred') }}
+curl -H "Authorization: Bearer {{ plain }}" \
+     {{ base }}/api/v1/servers
+
+# {{ t('api_key_show.alternative_header') }}
+curl -H "X-API-Key: {{ plain }}" \
+     {{ base }}/api/v1/servers</code></pre>
+
+    <p class="muted small" style="margin-top:14px">
+      {{ t('api_key_show.full_openapi_documentation_with_all_endpoints') }}
+      <a href="/api/v1/docs" target="_blank">/api/v1/docs</a>
+      {{ t('api_key_show.swagger_ui_lets_you_try_requests_in_your') }}
+    </p>
+
+    <div class="form-actions" style="margin-top:24px">
+      <a href="/settings#integrations" class="btn btn-primary"
+         data-confirm="{{ t('api_key.copy_confirm') }}">
+        {{ t('api_key_show.ive_copied_the_key') }}
+      </a>
+    </div>
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const btn = document.getElementById('btn-copy-key');
+  const code = document.getElementById('plain-key');
+  if (!btn || !code) return;
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(code.textContent).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = window.rpT('clipboard.copied');
+      setTimeout(() => btn.textContent = orig, 2000);
+    }).catch(() => alert(window.rpT('clipboard.copy_key_failed')));
+  });
+})();
+</script>
+{% endblock %}

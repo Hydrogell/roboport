@@ -1,0 +1,15 @@
+{% if locale_can_switch %}
+<form class="language-picker" method="post" action="/language" aria-label="{{ t('locale.language') }}">
+  <input type="hidden" name="next" value="{{ locale_next }}">
+  <span class="language-field" title="{{ t('locale.language') }} · {{ locale_name }}">
+    <span aria-hidden="true">{{ locale_code | upper }}</span>
+    <select name="code" aria-label="{{ t('locale.language') }}">
+      <option value="auto"{% if locale_choice == 'auto' %} selected{% endif %}>{{ t('locale.browser') }}</option>
+      {% for code, name in locale_options %}
+        <option value="{{ code }}" lang="{{ code }}"{% if locale_choice == code %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <noscript><button type="submit" class="btn btn-sm">{{ t('locale.apply') }}</button></noscript>
+</form>
+{% endif %}

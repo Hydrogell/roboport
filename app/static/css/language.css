@@ -1,0 +1,30 @@
+.language-picker { display: inline-flex; align-items: center; margin: 0; }
+.language-field {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 38px; height: 34px; padding: 0 5px;
+  border: 1px solid var(--border-1); border-radius: var(--radius-1);
+  color: var(--text-2); font: 600 11px/1 var(--font-sans);
+}
+.language-field::after {
+  content: ""; width: 4px; height: 4px;
+  border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(45deg);
+}
+.language-field:hover, .language-field:focus-within { color: var(--orange); border-color: currentColor; }
+.language-field:focus-within { outline: 2px solid currentColor; outline-offset: 1px; }
+.language-field select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.login-brand .language-picker { margin-inline-start: auto; }
+.topbar .language-field {
+  height: 38px; min-width: 40px; padding-inline: 7px; gap: 6px;
+  border-color: transparent; font-size: 12px;
+}
+.topbar .language-field:hover { background: var(--bg-2); color: var(--text-1); }
+.topbar .language-field:has(select:focus-visible) { outline-color: var(--orange); }
+@media (max-width: 900px) {
+  .language-field, .topbar .language-field { min-width: 44px; height: 44px; overflow: hidden; }
+  .language-field select { font-size: 16px; }
+}
+@media (max-width: 400px) {
+  .topbar { padding-inline: 6px; }
+  .topbar-actions { gap: 2px; }
+}

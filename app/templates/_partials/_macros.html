@@ -1,0 +1,41 @@
+{# Общие Jinja-макросы для шаблонов панели. Импортируется из dashboard.html и
+   live-fragment'ов, чтобы spark-svg рендерился из одного источника. #}
+
+{# Спарклайн: SVG polyline по N точкам в 0..100. Если точек <2 — placeholder. #}
+{% macro spark(values, color='#ff8c1a', width=80, height=20) -%}
+  {%- if values and values|length >= 2 -%}
+    {%- set n = values|length -%}
+    {%- set pad = 1 -%}
+    {%- set h = height - pad * 2 -%}
+    {%- set w = width - pad * 2 -%}
+    <svg class="spark" width="{{ width }}" height="{{ height }}"
+         viewBox="0 0 {{ width }} {{ height }}" aria-hidden="true"
+         style="vertical-align:middle">
+      <polyline fill="none" stroke="{{ color }}" stroke-width="1.4" stroke-linejoin="round"
+        points="{%- for v in values -%}
+          {{- '%.2f'|format(pad + (loop.index0 / (n - 1)) * w) -}},
+          {{- '%.2f'|format(pad + h - (([v, 0]|max)|float / 100.0 * h)) }}{% if not loop.last %} {% endif -%}
+        {%- endfor -%}"/>
+    </svg>
+  {%- else -%}
+    <span class="muted small" style="font-size:10px">·</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro toolbar_icon(name) -%}
+  <svg class="toolbar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" focusable="false"><use href="{{ url_for('static', path='icons/topbar.svg') }}?v={{ static_v }}#{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro second_factor_field(autofocus=false) -%}
+  <label class="field">
+    <span class="field-label">{{ t('stepup.2fa_code') }}</span>
+    <input type="text" name="code" class="input mono second-factor-code" required
+           minlength="6" maxlength="14" autocomplete="one-time-code"
+           autocapitalize="characters" spellcheck="false" placeholder="000000"{% if autofocus %} autofocus{% endif %}>
+    <span class="field-hint">
+      {{ t('stepup.a_6_digit_code_from_your_authenticator_app') }} <code>XXXX-XXXX-XXXX</code>.
+    </span>
+  </label>
+{%- endmacro %}

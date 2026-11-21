@@ -1,0 +1,62 @@
+# Секреты
+.env
+.env.*
+!.env.example
+
+# Бинарь Factorio (тянем установщиком, в репе не нужен)
+/factorio/
+/factorio-*/
+
+# Скачанные архивы установщика (большие, можно перекачать)
+/.cache/
+
+# Сейвы и серверные данные (ВАЖНО: внутри servers/<uuid>/config/rconpw —
+# секрет, при коммите утекает в публичную репу)
+/servers/
+/saves/
+/server-data/
+*.zip.tmp
+
+# Локальные одноразовые скрипты для миграций / scratch для scp
+/.tmp/
+
+# SQLite-БД панели — runtime state, не для VCS
+/app/panel.sqlite
+/app/panel.sqlite-*
+
+# Моды и их кеш (большие, тянутся mod portal-ом)
+/mods/
+mods_cache.json
+
+# Логи
+*.log
+/logs/
+
+# История апдейтов модов / бинаря
+.roboport-history.json
+factorio_versions.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code артефакты (worktrees, кэш и пр.)
+.claude/
+
+# Self-update бэкапы и staging
+/.backups/
+/.update-staging/
+/.uploads/

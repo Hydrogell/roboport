@@ -1,0 +1,467 @@
+<div class="terminal-wrap">
+  <div class="terminal-head">
+    <span class="muted small">
+      {{ t('console.connection_hint', docker_command='docker logs -f', port=server.port + 1) }}
+    </span>
+    <span class="terminal-status" id="ws-status">●&nbsp;{{ t('console.disconnected') }}</span>
+  </div>
+
+  {# Фильтр строк лога. UI рендерится JS-модулем LogFilter (chip-based,
+     несколько regex'ов в каждой группе). Persist в localStorage per-server. #}
+  <details class="server-log-filters" open>
+    <summary>{{ t('log_filter.filters') }}</summary>
+    <div id="log-filter-container"></div>
+  </details>
+
+  <pre id="terminal" class="terminal confidential" tabindex="0"
+       data-reveal-sec="60"
+       title="{{ t('console.streamer_mode_blurs_this_content_click_to_reveal') }}"></pre>
+
+  <form id="cmd-form" class="terminal-input" style="position:relative">
+    <input id="cmd-input" type="text" class="input" autocomplete="off"
+           placeholder="{% if is_running %}{{ t('server_tabs.console.command_press_tab_or_enter_to_accept_a') }}{% else %}{{ t('server_tabs.console.rcon_requires_a_running_server') }}{% endif %}"
+           {% if not is_running or rt_error %}disabled{% endif %}>
+    <button id="cmd-send" type="submit" class="btn"
+            {% if not is_running or rt_error %}disabled{% endif %}>{{ t('console.send') }}</button>
+    <div id="cmd-suggest" class="cmd-suggest" hidden role="listbox"></div>
+  </form>
+</div>
+
+<script src="/static/js/rcon-completions.js?v={{ static_v }}" nonce="{{ csp_nonce }}"></script>
+<script src="/static/js/log-filter.js?v={{ static_v }}" nonce="{{ csp_nonce }}"></script>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const uuid = "{{ server.uuid }}";
+  const term = document.getElementById("terminal");
+  const status = document.getElementById("ws-status");
+  const form = document.getElementById("cmd-form");
+  const input = document.getElementById("cmd-input");
+  const send = document.getElementById("cmd-send");
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/ws/servers/${uuid}/logs`;
+
+  let ws = null;
+  let retry = 0;
+  const history = [];
+  let histIdx = -1;
+
+  // ---------- Autocomplete ----------
+  const sug = document.getElementById('cmd-suggest');
+  const LUA_PREFIXES = ['/c ', '/silent-command ', '/measured-command ', '/command '];
+  let sugItems = [];     // текущий filtered список {label, insert, hint}
+  let sugIdx = 0;        // выбранный индекс
+  let sugReplaceFrom = 0; // позиция в input.value откуда подставлять completion
+
+  function isLuaContext(value) {
+    return LUA_PREFIXES.some(p => value.startsWith(p));
+  }
+
+  function buildSlashCandidates(token) {
+    // token = весь текст input'а; ищем slash-команды, чей sig начинается с него.
+    // Многоуровневые команды («/banlist add ») попадают сюда автоматически —
+    // когда юзер ввёл «/banlist » (с пробелом) или «/banlist a», в выдачу
+    // отфильтруются add/remove/get/clear. Для этого сравнение по startsWith
+    // работает буквально, без лишних эвристик.
+    const t = token.toLowerCase();
+    const out = [];
+    for (const c of (window.SLASH_CMDS || [])) {
+      const sig = c.sig.toLowerCase();
+      if (!t || sig.startsWith(t) || (t.length >= 2 && sig.includes(t))) {
+        out.push({
+          label: c.sig,
+          insert: c.sig,
+          hint: c.desc,
+          // Курсор: если sig оканчивается на пробел (надо ввести аргумент) —
+          // оставляем курсор на конце, иначе — конец строки.
+          cursorOffset: c.cursor || 0,
+          // Сигнатуры которые принимают player-имя как аргумент — после
+          // подстановки сразу идём в player-completion (см. ниже).
+          needsPlayer: c.needsPlayer || false,
+        });
+      }
+      if (out.length >= 25) break;
+    }
+    return out;
+  }
+
+  // Список ников игроков (history) с сервера. Запрашивается lazily при
+  // первом player-completion'е, кэшируется на сессию страницы.
+  let playerNamesPromise = null;
+  function fetchPlayerNames() {
+    if (playerNamesPromise) return playerNamesPromise;
+    // /servers/<uuid>/players-completion — cookie-based, отдаёт плоский
+    // массив строк (онлайн + последние 50 по истории). Кэшируется на сессию
+    // страницы; обновляется только при F5 — для автокомплита это норм,
+    // ники редко меняются.
+    playerNamesPromise = fetch(`/servers/${uuid}/players-completion`,
+      { credentials: 'same-origin', cache: 'no-store' })
+      .then(r => r.ok ? r.json() : [])
+      .then(arr => Array.isArray(arr) ? arr.filter(Boolean) : [])
+      .catch(() => []);
+    return playerNamesPromise;
+  }
+
+  // Триггеры player-completion: после этих slash-команд ожидается ник.
+  const PLAYER_TRIGGERS = [
+    /^\/(?:ban|unban|kick|promote|demote|mute|unmute|ignore|unignore|whisper|open) +([\w-]*)$/,
+    /^\/(?:banlist|whitelist) +(?:add|remove) +([\w-]*)$/,
+    /^\/swap-players +([\w-]*)$/,
+    /^\/swap-players +\S+ +([\w-]*)$/,
+  ];
+
+  async function buildPlayerCandidates(value) {
+    let partial = '';
+    let matched = false;
+    for (const re of PLAYER_TRIGGERS) {
+      const m = value.match(re);
+      if (m) { partial = m[1] || ''; matched = true; break; }
+    }
+    if (!matched) return null;
+    const names = await fetchPlayerNames();
+    sugReplaceFrom = value.length - partial.length;
+    const t = partial.toLowerCase();
+    return names
+      .filter(n => !t || n.toLowerCase().startsWith(t))
+      .map(n => ({ label: n, insert: n, hint: window.rpT('console.player_from_session_history') }))
+      .slice(0, 25);
+  }
+
+  function buildLuaCandidates(value) {
+    // Учитываем prefix /c / /silent-command / etc — отрезаем его.
+    const prefix = LUA_PREFIXES.find(p => value.startsWith(p));
+    if (!prefix) return [];
+    const luaPart = value.slice(prefix.length);
+
+    // Хвост идентификатора с точками И индексами: «game.players[1].force.te»
+    // → tail='game.players[1].force.te'. Сегмент = идентификатор ИЛИ [...].
+    // Для completion'а мы заменяем только partial (после последней точки) —
+    // не трогаем уже введённый bracket-access.
+    const TAIL_RE = /(?:[\w]+|\[[^\]]*\])(?:\.(?:[\w]+|\[[^\]]*\]))*$/;
+    const m = luaPart.match(TAIL_RE);
+    const tail = m ? m[0] : '';
+    sugReplaceFrom = prefix.length + (luaPart.length - tail.length);
+
+    const dotIdx = tail.lastIndexOf('.');
+    if (dotIdx === -1) {
+      // Без точки — top-level globals (либо сам tail короткий идентификатор,
+      // либо tail = '[...]' что для top-level подсказок неинтересно)
+      if (tail.startsWith('[')) return [];
+      const t = tail.toLowerCase();
+      return (window.LUA_TOP || [])
+        .filter(x => !t || x.name.toLowerCase().startsWith(t))
+        .map(x => ({ label: x.name, insert: x.name, hint: x.desc }))
+        .slice(0, 25);
+    }
+    // Есть точка — ищем members. head = всё до последней точки, partial =
+    // после. sugReplaceFrom уже привязан к началу tail'а — для подстановки
+    // нам нужно сдвинуть на head + '.' (replaceFrom = от prefix → head.).
+    const head = tail.slice(0, dotIdx);
+    const partial = tail.slice(dotIdx + 1).toLowerCase();
+    sugReplaceFrom += head.length + 1;  // подставляем только partial → name
+
+    // last meaningful segment — последний идентификатор перед концом head.
+    // 'game' → 'game'
+    // 'game.players[1]' → 'players'
+    // 'game.players[1].force' → 'force'
+    // 'game.players[\'X\'].character' → 'character'
+    const segs = head.split('.');
+    let lastSeg = '';
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const s = segs[i];
+      const idMatch = s.match(/^[\w]+/);
+      if (idMatch) { lastSeg = idMatch[0]; break; }
+    }
+    const lastSegL = lastSeg.toLowerCase();
+    const M = window.LUA_MEMBERS || {};
+    // Сначала пробуем точный head — например 'game.player' специально
+    // зарегистрирован отдельно от 'game.players[X]'.
+    let members = M[head] || M['game.' + lastSegL];
+    if (!members) {
+      // Маппим last segment на класс. Bracket-access (game.players[1])
+      // даёт ELEMENT коллекции — то есть game.player для players, и т.п.
+      const map = {
+        players: 'game.player', player: 'game.player',
+        connected_players: 'game.player',
+        forces: 'game.force', force: 'game.force',
+        surfaces: 'game.surface', surface: 'game.surface',
+        entities: 'game.entity', entity: 'game.entity',
+        character: 'game.entity', selected: 'game.entity', opened: 'game.entity',
+      };
+      const target = map[lastSegL];
+      if (target) members = M[target];
+    }
+    if (!members) return [];
+    return members
+      .filter(x => !partial || x.name.toLowerCase().startsWith(partial))
+      .map(x => ({
+        label: x.name + (x.sig ? ' ' + x.sig.replace(x.name, '') : ''),
+        insert: x.name,
+        hint: x.desc || '',
+      }))
+      .slice(0, 25);
+  }
+
+  // refreshSuggestions может уходить в async (player names фетчатся);
+  // защищаемся от race — current request id, на устаревший ответ не реагируем.
+  let refreshSeq = 0;
+  function refreshSuggestions() {
+    if (input.disabled) { hideSuggestions(); return; }
+    const val = input.value;
+    if (!val) { hideSuggestions(); return; }
+    const mySeq = ++refreshSeq;
+
+    if (isLuaContext(val)) {
+      const candidates = buildLuaCandidates(val);
+      applyCandidates(candidates, mySeq);
+      return;
+    }
+    if (val.startsWith('/')) {
+      // Сначала пробуем player-completion (после /ban, /kick и др.); если
+      // паттерн не совпал — обычный slash-completion.
+      buildPlayerCandidates(val).then(playerCands => {
+        if (mySeq !== refreshSeq) return;  // input уже изменился
+        if (playerCands && playerCands.length) {
+          applyCandidates(playerCands, mySeq);
+          return;
+        }
+        sugReplaceFrom = 0;
+        applyCandidates(buildSlashCandidates(val), mySeq);
+      });
+      return;
+    }
+    hideSuggestions();
+  }
+
+  function applyCandidates(candidates, seq) {
+    if (seq !== refreshSeq) return;
+    sugItems = candidates || [];
+    sugIdx = 0;
+    if (!sugItems.length) { hideSuggestions(); return; }
+    renderSuggestions();
+  }
+
+  function renderSuggestions() {
+    sug.innerHTML = '';
+    sugItems.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'cmd-suggest-item' + (i === sugIdx ? ' selected' : '');
+      row.role = 'option';
+      const name = document.createElement('span');
+      name.className = 'cmd-suggest-name';
+      name.textContent = it.label;
+      const desc = document.createElement('span');
+      desc.className = 'cmd-suggest-desc';
+      desc.textContent = it.hint || '';
+      row.appendChild(name);
+      if (it.hint) row.appendChild(desc);
+      row.addEventListener('mousedown', e => {
+        // mousedown а не click: иначе input теряет focus → blur скрывает
+        e.preventDefault();
+        applySuggestion(i);
+      });
+      sug.appendChild(row);
+    });
+    sug.hidden = false;
+  }
+
+  function hideSuggestions() {
+    sug.hidden = true;
+    sugItems = [];
+    sugIdx = 0;
+  }
+
+  function applySuggestion(i) {
+    const it = sugItems[i];
+    if (!it) return;
+    const before = input.value.slice(0, sugReplaceFrom);
+    input.value = before + it.insert;
+    // Курсор: если completion заканчивается пробелом или cursorOffset задан
+    // отрицательным — не двигаем в конец. Иначе ставим в конец.
+    if (it.cursorOffset && it.cursorOffset < 0) {
+      const pos = input.value.length;
+      input.setSelectionRange(pos, pos);
+    } else {
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+    refreshSuggestions();  // мог открыться ещё уровень (game. → подменили на game)
+  }
+
+  // ---------- Buffer + filter ----------
+  // Буфер всех входящих строк (для re-render при смене фильтра). Лимит 2000
+  // — на пиковом спаме это ~200KB, фильтрация мгновенная.
+  const BUFFER_LIMIT = 2000;
+  const buffer = [];
+  // Инкрементальный счётчик видимых — чтобы не пересчитывать весь buffer
+  // на каждое WS-сообщение. На rerender() (изменение фильтра) — пересчёт.
+  let visibleCount = 0;
+
+  const filter = window.LogFilter.attach({
+    container: document.getElementById('log-filter-container'),
+    storageKey: 'roboport.log-filter.{{ server.uuid }}',
+    presets: [
+      { label: window.rpT('log_filter.hide_rcon_label'),
+        title: window.rpT('log_filter.hide_rcon_hint'),
+        hide: ['New RCON connection from IP'] },
+      { label: window.rpT('log_filter.hide_save_label'),
+        title: window.rpT('console.hide_saving_and_saved_lines'),
+        hide: ['Saving (game|map)', '\\bSaved as\\b'] },
+      { label: window.rpT('log_filter.errors_only_label'),
+        title: window.rpT('console.show_only_errors_and_warnings'),
+        show: ['\\b(Error|Warning|Crash)\\b'] },
+    ],
+    onChange: rerender,
+  });
+
+  function append(line) {
+    buffer.push(line);
+    if (buffer.length > BUFFER_LIMIT) {
+      // Удалили старую — корректируем visibleCount если она была видна
+      const removed = buffer.shift();
+      if (filter.matches(removed)) visibleCount--;
+    }
+    if (!filter.matches(line)) { scheduleStat(); return; }
+    visibleCount++;
+    const atBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 8;
+    term.textContent += line + "\n";
+    if (atBottom) term.scrollTop = term.scrollHeight;
+    scheduleStat();
+  }
+
+  function rerender() {
+    const visible = filter.matchesBatch(buffer);
+    visibleCount = visible.length;
+    term.textContent = visible.length ? visible.join('\n') + '\n' : '';
+    term.scrollTop = term.scrollHeight;
+    filter.setStat(visibleCount, buffer.length);
+  }
+
+  // Debounce обновления счётчика — на спаме 50+ строк/сек дёргать textContent
+  // статуса каждый раз = реflow. rAF group'ает в один кадр.
+  let statFrame = 0;
+  function scheduleStat() {
+    if (statFrame) return;
+    statFrame = requestAnimationFrame(() => {
+      statFrame = 0;
+      filter.setStat(visibleCount, buffer.length);
+    });
+  }
+
+  function setStatus(text, cls) {
+    status.textContent = "● " + text;
+    status.className = "terminal-status " + cls;
+  }
+
+  function connect() {
+    setStatus(window.rpT('console.connecting'), 'connecting');
+    ws = new WebSocket(url);
+    ws.onopen = () => { retry = 0; setStatus(window.rpT('console.connected'), 'connected'); };
+    ws.onmessage = (e) => append(e.data);
+    ws.onclose = (e) => {
+      setStatus(window.rpT('console.disconnected'), 'disconnected');
+      // code=1000 (normal) — бэк сам закрыл (контейнер stopped/Docker недоступен).
+      // Не реконнектим: иначе крутим бесконечный цикл со снапшотами старых логов.
+      // Юзер обновит страницу когда захочет.
+      if (e.code === 1000) return;
+      // code=1008 (policy violation) — провалилась WS-аутентификация:
+      // нет cookie / сессия истекла / IP забанен / Origin не совпал.
+      // Редиректим на /login с возвратом на эту же страницу. Реконнект
+      // здесь бесполезен — он провалится по той же причине.
+      if (e.code === 1008) {
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = "/login?next=" + next;
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** retry++, 15000);
+      setTimeout(connect, delay);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      append(window.rpT('console.await_reconnect'));
+      return;
+    }
+    ws.send(cmd);
+    history.push(cmd);
+    histIdx = history.length;
+    input.value = "";
+  });
+
+  // Live-update подсказок при вводе
+  input.addEventListener('input', refreshSuggestions);
+  input.addEventListener('focus', refreshSuggestions);
+  input.addEventListener('blur', () => {
+    // даём шанс mousedown на suggestion'е сработать
+    setTimeout(hideSuggestions, 120);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    const sugOpen = !sug.hidden && sugItems.length > 0;
+
+    // Tab — применить выбранную подсказку (если открыта)
+    if (e.key === 'Tab' && sugOpen) {
+      e.preventDefault();
+      applySuggestion(sugIdx);
+      return;
+    }
+
+    if (sugOpen) {
+      // ↑↓ внутри dropdown'а — навигация по подсказкам, не по истории
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        sugIdx = (sugIdx + 1) % sugItems.length;
+        renderSuggestions();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        sugIdx = (sugIdx - 1 + sugItems.length) % sugItems.length;
+        renderSuggestions();
+        return;
+      }
+      // Enter — применить подсказку (вместо submit'а), если уже выбрана
+      // и текст в поле ввода. Первый Enter
+      // довводит, второй отправляет.
+      if (e.key === 'Enter') {
+        const it = sugItems[sugIdx];
+        const before = input.value.slice(0, sugReplaceFrom);
+        const expected = before + it.insert;
+        if (input.value !== expected) {
+          e.preventDefault();
+          applySuggestion(sugIdx);
+          return;
+        }
+        // если уже совпадает — fall through к нативному submit'у формы
+      }
+      if (e.key === 'Escape') {
+        hideSuggestions();
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // ↑↓ без открытого dropdown — history (старое поведение)
+    if (e.key === "ArrowUp" && histIdx > 0) {
+      histIdx--;
+      input.value = history[histIdx];
+      e.preventDefault();
+    } else if (e.key === "ArrowDown") {
+      if (histIdx < history.length - 1) {
+        histIdx++;
+        input.value = history[histIdx];
+      } else {
+        histIdx = history.length;
+        input.value = "";
+      }
+      e.preventDefault();
+    }
+  });
+
+  connect();
+})();
+</script>

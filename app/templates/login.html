@@ -1,0 +1,226 @@
+{% from '_partials/_macros.html' import second_factor_field with context -%}
+<!doctype html>
+<html lang="{{ locale_code }}" dir="{{ locale_dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="author" content="Gellou">
+  <title>{% if is_setup %}{{ t('login.setup') }}{% else %}{{ t('login.sign_in') }}{% endif %} — Roboport</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ static_v }}">
+  {% include '_partials/locale_head.html' %}
+  <script nonce="{{ csp_nonce }}">
+    (function () {
+      try {
+        if (localStorage.getItem('roboport.theme') === 'light')
+          document.documentElement.setAttribute('data-theme', 'light');
+      } catch (e) {}
+    })();
+    // Чистим ?msg=/&err= из URL после рендера flash (этот шаблон не extends base.html
+    // поэтому копируем сюда же; см. base.html для основного места).
+    (function () {
+      try {
+        const url = new URL(location.href);
+        if (url.searchParams.has('msg') || url.searchParams.has('err')) {
+          url.searchParams.delete('msg');
+          url.searchParams.delete('err');
+          history.replaceState(null, '', url.toString());
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-logo">R</div>
+        <div class="brand-text">
+          <div class="brand-title">ROBOPORT</div>
+          <div class="brand-sub">{% if is_setup %}{{ t('login.first_run') }}{% else %}controller{% endif %}</div>
+        </div>
+        {% include '_partials/locale_picker.html' %}
+      </div>
+
+      {% if is_setup %}
+      <h1 class="login-title">{{ t('login.create_admin') }}</h1>
+      <div class="muted small login-hint">
+        {{ t('login.setup_description') }}
+      </div>
+      {% elif is_2fa %}
+      <h1 class="login-title">{{ t('login.sign_in') }} · {{ username }}</h1>
+      <div class="muted small login-hint">
+        {{ t('login.totp_description') }}
+      </div>
+      {% else %}
+      <h1 class="login-title">{{ t('login.sign_in') }}</h1>
+      {% endif %}
+
+      {% if msg %}<div class="alert alert-ok">{{ msg }}</div>{% endif %}
+      {% if err %}<div class="alert alert-err">{{ err }}</div>{% endif %}
+
+      {# Rate-limit / IP-ban banner с обратным отсчётом. wait_until — unix-ts
+         когда снова можно пробовать; 0 = не забанен. wait_permanent=true —
+         перманентный бан, таймер не показываем. #}
+      {% if wait_permanent %}
+      <div class="alert alert-err" id="ban-banner">
+        <b>🚫 {{ t('login.ip_blocked') }}</b>
+        <div class="muted small" style="margin-top:4px">
+          {{ t('login.permanent_ban_hint') }}
+          <code class="mono">{{ t('login.python_m_app_cli_unban_your_ip') }}</code>.
+        </div>
+      </div>
+      {% elif wait_until and wait_until > 0 %}
+      <div class="alert alert-warn" id="ban-banner" data-until="{{ wait_until }}">
+        <b>⏳ {{ t('login.too_many_attempts') }}</b>
+        <span id="ban-countdown">{{ t('login.wait_before_retry', time='…') }}</span>
+      </div>
+      {% endif %}
+
+      {% if is_2fa %}
+      <form method="post" action="/login/2fa" class="form login-form"
+            autocomplete="off" spellcheck="false">
+        {{ second_factor_field(autofocus=true) }}
+        <input type="hidden" name="next" value="{{ next or '/' }}">
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-wide">{{ t('login.sign_in') }}</button>
+        </div>
+      </form>
+      <div class="login-foot">
+        <a href="/login" class="muted small">← {{ t('login.start_again') }}</a>
+        <span class="muted small login-version">v{{ panel_version }}</span>
+      </div>
+      {% else %}
+      <form method="post" action="{% if is_setup %}/setup{% else %}/login{% endif %}"
+            class="form login-form" autocomplete="off" spellcheck="false">
+
+        <label class="field">
+          <span class="field-label">{{ t('login.username') }}</span>
+          <input type="text" name="username" required class="input"
+                 minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+"
+                 autocomplete="username" autofocus
+                 placeholder="{{ t('login.username_placeholder') }}">
+          {% if is_setup %}
+          <span class="field-hint">{{ t('login.username_hint') }}</span>
+          {% endif %}
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('login.password') }}</span>
+          <span class="pw-input">
+            <input type="password" name="password" required class="input"
+                   minlength="8" maxlength="256"
+                   autocomplete="{% if is_setup %}new-password{% else %}current-password{% endif %}">
+            <button type="button" class="pw-toggle" tabindex="-1"
+                    title="{{ t('login.toggle_password') }}">👁</button>
+          </span>
+          {% if is_setup %}
+          <span class="field-hint">{{ t('login.password_hint') }}</span>
+          {% endif %}
+        </label>
+
+        {% if is_setup %}
+        <label class="field">
+          <span class="field-label">{{ t('login.repeat_password') }}</span>
+          <span class="pw-input">
+            <input type="password" name="password2" required class="input"
+                   minlength="8" maxlength="256" autocomplete="new-password">
+            <button type="button" class="pw-toggle" aria-label="{{ t('login.toggle_password') }}">👁</button>
+          </span>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('setup.code_label') }}</span>
+          <input type="text" name="setup_code" class="input" required maxlength="32"
+                 autocomplete="one-time-code" autocapitalize="none" spellcheck="false">
+          <span class="field-hint">{{ t('setup.code_hint', command=setup_command) }}</span>
+        </label>
+        {% else %}
+        <input type="hidden" name="next" value="{{ next or '/' }}">
+        {% endif %}
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-wide">
+            {% if is_setup %}{{ t('login.create_and_sign_in') }}{% else %}{{ t('login.sign_in') }}{% endif %}
+          </button>
+        </div>
+      </form>
+
+      <div class="login-foot">
+        {% if not is_setup %}
+        <details class="login-help">
+          <summary>{{ t('login.forgot_password') }}</summary>
+          <div class="login-help-body muted small">
+            {{ t('login.recovery_help') }}
+            <form method="post" action="/recovery/request" class="login-help-form">
+              <button type="submit" class="btn btn-sm">{{ t('login.write_code_to_log') }}</button>
+            </form>
+          </div>
+        </details>
+        {% endif %}
+        <span class="muted small login-version">v{{ panel_version }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </main>
+
+  <script nonce="{{ csp_nonce }}">
+    // Pw-toggle (тот же что в base.html, но base.html на login-странице не подгружается)
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('.pw-toggle');
+      if (!btn) return;
+      const inp = btn.parentElement.querySelector('input');
+      if (!inp) return;
+      const showing = inp.type === 'text';
+      inp.type = showing ? 'password' : 'text';
+      btn.textContent = showing ? '👁' : '🙈';
+    });
+
+    // ---------- Rate-limit countdown ----------
+    // Если есть #ban-banner с data-until="<unix-ts>", тикаем секундами.
+    // Пока тикает — submit/inputs disabled. По окончании — баннер исчезает,
+    // форма разблокируется, фокус возвращается в первое поле.
+    (function () {
+      const banner = document.getElementById('ban-banner');
+      if (!banner) return;
+      const until = parseInt(banner.getAttribute('data-until') || '0', 10);
+      if (!until) return;  // permanent или нет таймера
+      const form = document.querySelector('form.login-form');
+      const out = document.getElementById('ban-countdown');
+
+      function lockForm(lock) {
+        if (!form) return;
+        for (const el of form.querySelectorAll('input, button')) {
+          if (el.type === 'hidden') continue;
+          el.disabled = lock;
+        }
+      }
+
+      function fmt(sec) {
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return m + ':' + String(s).padStart(2, '0');
+      }
+
+      function tick() {
+        const now = Math.floor(Date.now() / 1000);
+        const left = until - now;
+        if (left <= 0) {
+          // Бан кончился — снимаем замок, баннер на «можно пробовать»
+          lockForm(false);
+          banner.classList.remove('alert-warn');
+          banner.classList.add('alert-ok');
+          const message = document.createElement('b');
+          message.textContent = '✓ ' + window.rpT('login.can_retry');
+          banner.replaceChildren(message);
+          const first = form && form.querySelector('input:not([type=hidden])');
+          if (first) first.focus();
+          return;
+        }
+        out.textContent = window.rpT('login.wait_before_retry', {time: fmt(left)});
+        setTimeout(tick, 1000);
+      }
+
+      lockForm(true);
+      tick();
+    })();
+  </script>
+</body>
+</html>

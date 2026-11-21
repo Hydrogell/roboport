@@ -1,0 +1,293 @@
+{# Редактор основных полей server-settings.json + DB-уровневых (имя, порт, версия).
+   Любая правка settings — перезапуск сервера. Смена порта/версии — recreate. #}
+
+{% set s = cfg_settings %}
+{% set vis = 'public' if s.get('visibility', {}).get('public') else ('lan' if s.get('visibility', {}).get('lan') else 'none') %}
+
+<div class="config-wrap">
+
+  {% if cfg_msg %}
+  <div class="alert alert-ok">{{ cfg_msg }}</div>
+  {% endif %}
+  {% if cfg_err %}
+  <div class="alert alert-err">{{ cfg_err }}</div>
+  {% endif %}
+
+  <div class="muted small" style="margin-bottom:12px">
+    {{ t('server_tabs.config.file') }} <code class="mono">servers/{{ server.uuid }}/config/server-settings.json</code> {{ t('server_tabs.config.edit_the_full_json_under') }} <a href="/servers/{{ server.uuid }}/files?path=config" class="link">{{ t('config.files') }}</a>.
+  </div>
+
+  <form method="post" action="/servers/{{ server.uuid }}/config/update" class="form" id="config-form"
+        data-persist
+        data-orig-port="{{ server.port }}"
+        data-orig-version="{{ server.version }}"
+        data-orig-netmode="{{ server.network_mode or 'bridge' }}">
+
+    <section class="card" style="margin-bottom:14px">
+      <div class="card-head"><span class="card-head-title">{{ t('config.identity') }}</span></div>
+      <div class="card-body">
+        <div class="form-row">
+          <label class="field">
+            <span class="field-label">{{ t('config.server_name') }}</span>
+            <input type="text" name="name" required maxlength="40"
+                   value="{{ server.name }}" class="input">
+            <span class="field-hint">{{ t('config.use_a_z_0_9_spaces_underscores_or') }}</span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('server_new.factorio_version') }}
+              <span class="badge" title="{{ t('config.changing_this_requires_recreating_the_container') }}">{{ t('config.recreate_badge') }}</span>
+            </span>
+            <input type="text" name="version" required value="{{ server.version }}"
+                   class="input" list="cfg-versions">
+            <datalist id="cfg-versions">
+              {% for v in cfg_versions %}<option value="{{ v }}">{% endfor %}
+            </datalist>
+            <span class="field-hint">{{ t('config.used_as_the_image_tag_in_factoriotools_factorio') }}</span>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="field">
+            <span class="field-label">{{ t('server_tabs.config.port_udp') }}
+              <span class="badge" title="{{ t('config.changing_this_requires_recreating_the_container_hint') }}">{{ t('config.recreate_badge') }}</span>
+            </span>
+            <input type="number" name="port" min="1024" max="65535" required
+                   value="{{ server.port }}" class="input">
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('config.player_limit') }}</span>
+            <input type="number" name="max_players" min="0" max="500"
+                   value="{{ s.get('max_players', 0) }}" class="input">
+            <span class="field-hint">{{ t('config.0_unlimited') }}</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-bottom:14px">
+      <div class="card-head"><span class="card-head-title">{{ t('config.visibility_and_access') }}</span></div>
+      <div class="card-body">
+        <div class="form-row">
+          <label class="field">
+            <span class="field-label">{{ t('config.visibility') }}</span>
+            <select name="visibility" class="input">
+              <option value="lan"    {% if vis=='lan' %}selected{% endif %}>{{ t('config.lan_local_network_only') }}</option>
+              <option value="public" {% if vis=='public' %}selected{% endif %}>{{ t('config.public_listed_publicly') }}</option>
+              <option value="none"   {% if vis=='none' %}selected{% endif %}>{{ t('config.none_private_connect_by_ip') }}</option>
+            </select>
+            <span class="field-hint">{{ t('config.public_automatically_enables_require_user_verification') }}</span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('config.game_password') }}</span>
+            <span class="pw-input">
+              <input type="password" name="password" maxlength="60" autocomplete="off"
+                     value="{{ s.get('game_password', '') }}" class="input confidential"
+                     placeholder="{{ t('config.no_password') }}">
+              <button type="button" class="pw-toggle" tabindex="-1"
+                      title="{{ t('config.show_or_hide_password') }}">👁</button>
+            </span>
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field-label">{{ t('config.description_motd') }}</span>
+          <textarea name="description" rows="6" maxlength="500" class="input motd-autoresize"
+                    style="min-height:7em;resize:vertical">{{ s.get('description', '') }}</textarea>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('config.who_can_use_commands') }}</span>
+          <select name="allow_commands" class="input">
+            {% set ac = s.get('allow_commands', 'admins-only') %}
+            <option value="admins-only" {% if ac=='admins-only' %}selected{% endif %}>{{ t('config.admins_only_admins_only') }}</option>
+            <option value="true"        {% if ac=='true' %}selected{% endif %}>{{ t('config.true_everyone') }}</option>
+            <option value="false"       {% if ac=='false' %}selected{% endif %}>{{ t('config.false_nobody_including_admins') }}</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card" style="margin-bottom:14px">
+      <div class="card-head">
+        <span class="card-head-title">{{ t('config.lan_visibility') }}</span>
+        <span class="muted small">{{ t('config.requires_recreating_the_container') }}</span>
+      </div>
+      <div class="card-body">
+        {% set is_host = (server.network_mode or 'bridge') == 'host' %}
+        <div class="seg-radio" role="radiogroup" aria-label="{{ t('config.container_network_mode') }}" id="netmode-seg">
+          <label class="seg-btn-radio {% if not is_host %}active{% endif %}">
+            <input type="radio" name="network_mode" value="bridge"
+                   {% if not is_host %}checked{% endif %}>
+            <span>{{ t('config.bridge_option') }}</span>
+          </label>
+          <label class="seg-btn-radio {% if is_host %}active{% endif %}">
+            <input type="radio" name="network_mode" value="host"
+                   {% if is_host %}checked{% endif %}>
+            <span>{{ t('config.host_option') }}</span>
+          </label>
+        </div>
+        <div class="muted small" style="margin-top:10px" id="netmode-desc-bridge"
+             {% if is_host %}hidden{% endif %}>
+          {{ t('config.bridge_network_hint') }}
+          <code class="mono">{{ request.url.hostname }}:{{ server.port }}</code>
+        </div>
+        <div class="muted small" style="margin-top:10px" id="netmode-desc-host"
+             {% if not is_host %}hidden{% endif %}>
+          {{ t('config.host_network_hint', port=34197) }}
+        </div>
+
+        {% if is_host %}
+        <div class="alert alert-err" style="margin-top:10px">
+          <p>{{ t('config.host_rcon_access', port=server.port + 1, password_file='config/rconpw') }}</p>
+          <code class="mono">sudo ufw deny in on eth0 to any port {{ server.port + 1 }}</code>
+        </div>
+        {% endif %}
+
+        <div class="muted small" style="margin-top:10px">
+          {{ t('config.lan_discovery_hint', port='34197/UDP') }}
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-bottom:14px">
+      <div class="card-head"><span class="card-head-title">{{ t('config.autosave') }}</span></div>
+      <div class="card-body">
+        <div class="form-row row-3">
+          <label class="field">
+            <span class="field-label">{{ t('config.autosave_interval_min') }}</span>
+            <input type="number" name="autosave_interval" min="1" max="1440"
+                   value="{{ s.get('autosave_interval', 10) }}" class="input">
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('config.autosave_slots') }}</span>
+            <input type="number" name="autosave_slots" min="1" max="100"
+                   value="{{ s.get('autosave_slots', 5) }}" class="input">
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('config.afk_kick_min_0_disables_it') }}</span>
+            <input type="number" name="afk_autokick_interval" min="0" max="1440"
+                   value="{{ s.get('afk_autokick_interval', 0) }}" class="input">
+          </label>
+        </div>
+      </div>
+    </section>
+
+    {# Все boolean-toggle'ы собраны в одну секцию: Автозапуск, Whitelist,
+       auto_pause, only_admins_pause, non_blocking_saving. Длинные описания
+       спрятаны под ⓘ — при наведении показывается tooltip. #}
+    <section class="card" style="margin-bottom:14px">
+      <div class="card-head"><span class="card-head-title">{{ t('config.options') }}</span></div>
+      <div class="card-body">
+        <ul class="toggle-list">
+          <li class="toggle-row">
+            <label class="check-field">
+              <input type="checkbox" name="autostart" value="1"
+                     {% if server.autostart %}checked{% endif %}>
+              <span>{{ t('config.start_automatically_when_the_panel_starts') }}</span>
+            </label>
+            <span class="info-tip" tabindex="0"
+                  data-tip="{{ t('config.servers_with_this_option_enabled_start_automatically_after') }}">ⓘ</span>
+          </li>
+          <li class="toggle-row">
+            <label class="check-field">
+              <input type="checkbox" name="enable_whitelist" value="1"
+                     {% if cfg_whitelist_enabled %}checked{% endif %}>
+              <span>{{ t('server_tabs.config.allowlist') }}{% if cfg_whitelist_count %} {{ t('server_tabs.config.cfg_whitelist_count_listed', cfg_whitelist_count=(cfg_whitelist_count)) }}{% endif %}</span>
+            </label>
+            <span class="info-tip" tabindex="0"
+                  data-tip="{{ t('config.server_whitelist_json_disabling_the_allowlist_renames_the') }}">ⓘ</span>
+          </li>
+          <li class="toggle-row">
+            <label class="check-field">
+              <input type="checkbox" name="auto_pause" value="1"
+                     {% if s.get('auto_pause', True) %}checked{% endif %}>
+              <span>{{ t('config.pause_when_no_players_are_online') }}</span>
+            </label>
+          </li>
+          <li class="toggle-row">
+            <label class="check-field">
+              <input type="checkbox" name="only_admins_pause" value="1"
+                     {% if s.get('only_admins_can_pause_the_game', True) %}checked{% endif %}>
+              <span>{{ t('config.only_admins_can_pause') }}</span>
+            </label>
+          </li>
+          <li class="toggle-row">
+            <label class="check-field">
+              <input type="checkbox" name="non_blocking_saving" value="1"
+                     {% if s.get('non_blocking_saving', False) %}checked{% endif %}>
+              <span>{{ t('config.non_blocking_saving') }}</span>
+            </label>
+            <span class="info-tip" tabindex="0"
+                  data-tip="{{ t('config.recommended_for_dedicated_servers_factorio_saves_in_the') }}">ⓘ</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{{ t('config.save') }}</button>
+      <span class="muted small">
+        {{ t('config.apply_changes_hint', file='settings.json') }}
+      </span>
+    </div>
+  </form>
+
+  <script nonce="{{ csp_nonce }}">
+  (function () {
+    // Сегмент-контрол Bridge/Host: подсвечивает active-label и переключает
+    // соответствующий блок описания. Native radio внутри label переключаются
+    // вместе с формой как обычно — JS трогает только визуал.
+    const seg = document.getElementById('netmode-seg');
+    if (seg) {
+      const labels = seg.querySelectorAll('.seg-btn-radio');
+      const descs = {
+        bridge: document.getElementById('netmode-desc-bridge'),
+        host:   document.getElementById('netmode-desc-host'),
+      };
+      seg.addEventListener('change', e => {
+        const t = e.target;
+        if (t.type !== 'radio') return;
+        labels.forEach(l => {
+          const r = l.querySelector('input[type=radio]');
+          l.classList.toggle('active', !!r && r.checked);
+        });
+        Object.entries(descs).forEach(([k, el]) => {
+          if (el) el.hidden = (t.value !== k);
+        });
+      });
+    }
+  })();
+
+  (function () {
+    // Confirm на recreate-полях: port / version / network_mode. Если ни одно
+    // не изменилось — submit без диалога. Если изменилось хотя бы одно —
+    // объясняем юзеру что контейнер пересоздастся (активные соединения упадут).
+    const f = document.getElementById('config-form');
+    if (!f) return;
+    f.addEventListener('submit', e => {
+      const changed = [];
+      const port = f.querySelector('input[name=port]');
+      const version = f.querySelector('input[name=version]');
+      const netmode = f.querySelector('input[name=network_mode]:checked');
+      if (port && String(port.value).trim() !== f.dataset.origPort) {
+        changed.push(window.rpT('config.change_port', {old: f.dataset.origPort, next: port.value}));
+      }
+      if (version && version.value.trim() !== f.dataset.origVersion) {
+        changed.push(window.rpT('config.change_version', {old: f.dataset.origVersion, next: version.value}));
+      }
+      if (netmode && netmode.value !== f.dataset.origNetmode) {
+        changed.push(window.rpT('config.change_network', {old: f.dataset.origNetmode, next: netmode.value}));
+      }
+      if (changed.length === 0) return;  // обычное сохранение
+      const msg = window.rpT('config.recreate_confirm', {changes: changed.map(line => '  • ' + line).join('\n')});
+      if (!confirm(msg)) e.preventDefault();
+    });
+  })();
+  </script>
+
+</div>

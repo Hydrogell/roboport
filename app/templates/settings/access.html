@@ -1,0 +1,130 @@
+<section class="settings-section">
+  <h2>{{ t('settings.access.panel_addresses') }}</h2>
+  {% for url in network.access_urls %}
+    <div class="settings-row">
+      <a class="mono confidential" href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a>
+      <span class="setting-value">
+        {% if '.local' in url %}{{ t('settings.access.home_network') }}
+        {% elif network.fqdn != network.hostname and network.fqdn in url %}{{ t('settings.access.domain') }}
+        {% else %}{{ t('settings.access.ip_address') }}{% endif %}
+      </span>
+    </div>
+  {% else %}
+    <p>{{ t('settings.access.addresses_are_not_available_yet') }}</p>
+  {% endfor %}
+  {% if network.cert %}
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.access.change_the_local_network_name') }}</span><span class="setting-value">{{ local_domain_current or network.mdns_name or t('settings.access.not_specified') }}</span></summary>
+      <div class="settings-body">
+        <form method="post" action="/settings/tls/local-domain" class="form"
+              data-confirm="{{ t('settings.access.reissue_the_certificate_and_change_the_local_address') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <label class="field">
+            <span class="field-label">{{ t('settings.access.local_address') }}</span>
+            <input name="name" class="input" value="{{ local_domain_current or network.mdns_name or '' }}"
+                   placeholder="roboport.local" maxlength="70" autocomplete="off" required
+                   pattern="[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.local">
+            <span class="field-hint">{{ t('settings.access.enter_one_name_ending_in_local_such_as') }}</span>
+          </label>
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.access.apply') }}</button></div>
+        </form>
+      </div>
+    </details>
+  {% endif %}
+</section>
+
+<section class="settings-section">
+  <h2>{{ t('settings.access.https_certificate') }}</h2>
+  {% if network.cert %}
+    {% set cert = network.cert %}
+    <div class="settings-row">
+      <span>{{ t('settings.access.self_signed') if cert.is_self_signed else t('settings.access.issued_by_a_certificate_authority') }}</span>
+      <span class="setting-value">
+        {% if cert.days_remaining > 30 %}{{ t('settings.access.days_remaining_days_left', days_remaining=(cert.days_remaining)) }}
+        {% elif cert.days_remaining > 0 %}<strong>{{ t('settings.access.expires_in_days_remaining_days', days_remaining=(cert.days_remaining)) }}</strong>
+        {% else %}<strong>{{ t('settings.access.expired') }}</strong>{% endif %}
+      </span>
+    </div>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.access.certificate_details') }}</span></summary>
+      <div class="settings-body">
+        <dl class="settings-facts">
+          <dt>{{ t('settings.access.subject') }}</dt><dd>{{ cert.subject }}</dd>
+          <dt>{{ t('settings.access.issuer') }}</dt><dd>{{ cert.issuer }}</dd>
+          <dt>{{ t('settings.access.validity_period') }}</dt><dd>{{ cert.not_before | unixtime(with_rel=False) }} → {{ cert.not_after | unixtime(with_rel=False) }}</dd>
+          <dt>{{ t('settings.access.names_and_addresses_san') }}</dt><dd>{{ cert.san | join(' · ') }}</dd>
+          <dt>{{ t('settings.access.sha_256_fingerprint') }}</dt><dd><code class="confidential">{{ cert.fingerprint_sha256 }}</code></dd>
+          <dt>{{ t('settings.access.file') }}</dt><dd><code class="confidential">{{ network.cert_path }}</code></dd>
+        </dl>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.access.replace_certificate') }}</span></summary>
+      <div class="settings-body">
+        <form method="post" action="/settings/tls/regenerate" class="form"
+              data-confirm="{{ t('settings.access.reissue_the_certificate_your_browser_may_ask_you') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <p>{{ t('settings.access.renew_the_self_signed_certificate_after_changing_the') }}</p>
+          <div class="form-actions"><button class="btn">{{ t('settings.access.reissue_certificate') }}</button></div>
+        </form>
+        <form method="post" action="/settings/tls/upload" enctype="multipart/form-data" class="form"
+              data-confirm="{{ t('settings.access.replace_the_current_certificate_and_private_key_with') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <label class="field"><span class="field-label">{{ t('settings.access.custom_certificate_with_chain_pem') }}</span>
+            <input type="file" name="cert_file" class="input" accept=".pem,.crt" required>
+          </label>
+          <label class="field"><span class="field-label">{{ t('settings.access.private_key_pem') }}</span>
+            <input type="file" name="key_file" class="input" accept=".pem,.key" required>
+          </label>
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.access.upload_and_apply') }}</button></div>
+        </form>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.access.configure_https_from_the_terminal') }}</span></summary>
+      <div class="settings-body">
+        <pre><code># {{ t('settings.access.reissue_a_self_signed_certificate') }}
+sudo SELFSIGNED_FORCE=1 bash /opt/roboport/deploy/gen-self-signed.sh
+sudo systemctl reload nginx
+
+# {{ t('settings.access.get_a_lets_encrypt_certificate_for_your_domain') }}
+sudo certbot --nginx -d panel.example.com
+
+# {{ t('settings.access.install_your_pem_files') }}
+sudo cp myCert.pem /etc/nginx/roboport-tls/cert.pem
+sudo cp myKey.pem /etc/nginx/roboport-tls/key.pem
+sudo chmod 644 /etc/nginx/roboport-tls/cert.pem
+sudo chmod 600 /etc/nginx/roboport-tls/key.pem
+sudo nginx -t &amp;&amp; sudo systemctl reload nginx</code></pre>
+      </div>
+    </details>
+  {% else %}
+    <p>{{ t('settings.access.roboport_could_not_find_a_certificate_on_this') }}</p>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.access.configure_https_on_the_host') }}</span></summary>
+      <div class="settings-body">
+        <pre><code>cd /opt/roboport
+INSTALL_SYSTEMD=yes INSTALL_NGINX=yes INSTALL_TLS=selfsigned \
+    SERVER_NAME=$(hostname -I | awk '{print $1}') \
+    bash deploy/install.sh &lt; /dev/null</code></pre>
+      </div>
+    </details>
+  {% endif %}
+</section>
+
+<details class="settings-section settings-disclosure">
+  <summary><span>{{ t('settings.access.network_information') }}</span><span class="setting-value confidential">{{ network.hostname }}</span></summary>
+  <div class="settings-body">
+    <dl class="settings-facts">
+      <dt>{{ t('settings.access.hostname') }}</dt><dd>{{ network.hostname }}</dd>
+      {% if network.fqdn != network.hostname %}<dt>{{ t('settings.access.fully_qualified_domain_name') }}</dt><dd>{{ network.fqdn }}</dd>{% endif %}
+      <dt>{{ t('settings.access.network_discovery_mdns') }}</dt>
+      <dd>{% if network.has_avahi %}{{ t('schedule.enabled') }}{% if network.mdns_name %} · {{ network.mdns_name }}{% endif %}
+          {% else %}{{ t('settings.access.disabled_to_install_on_linux') }} <code>sudo apt install avahi-daemon</code>.{% endif %}</dd>
+      <dt>IPv4</dt><dd>{{ network.ipv4_addresses | join(' · ') or t('settings.access.no_addresses') }}</dd>
+      {% if network.ipv4_docker_bridges %}
+        <dt>{{ t('settings.access.docker_container_networks') }}</dt><dd>{{ network.ipv4_docker_bridges | join(' · ') }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+</details>

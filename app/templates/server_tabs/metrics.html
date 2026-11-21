@@ -1,0 +1,326 @@
+{# Показатели: онлайн-активность игроков + железо контейнера.
+   Данные тянутся клиентским JS-ом из /servers/<uuid>/api/{stats,online-hist,sessions,metrics}.
+   Sampler пишет каждые ~30 сек когда контейнер running. #}
+
+<div class="metrics-wrap" id="metrics-tab" data-uuid="{{ server.uuid }}">
+
+  {# Range + mode toggles #}
+  <div class="metrics-toolbar">
+    <div class="seg" id="metrics-range" role="tablist" aria-label="{{ t('metrics.period') }}">
+      <button data-range="1d"   class="seg-btn active">{{ t('metrics.day') }}</button>
+      <button data-range="7d"   class="seg-btn">{{ t('metrics.week') }}</button>
+      <button data-range="30d"  class="seg-btn">{{ t('metrics.month') }}</button>
+      <button data-range="90d"  class="seg-btn">{{ t('metrics.3_months') }}</button>
+      <button data-range="365d" class="seg-btn">{{ t('metrics.year') }}</button>
+    </div>
+    <div class="seg" id="metrics-mode" role="tablist" aria-label="{{ t('metrics.histogram_mode') }}">
+      <button data-mode="unique" class="seg-btn active">{{ t('metrics.unique_players_label') }}</button>
+      <button data-mode="peak"   class="seg-btn">{{ t('metrics.peak_concurrent_players_label') }}</button>
+    </div>
+  </div>
+
+  {# Stat cards #}
+  <div class="stat-grid" id="metrics-stat-grid">
+    <div class="stat-card"><div class="stat-num" id="st-unique">—</div><div class="stat-lbl">{{ t('metrics.unique_players_2') }}</div></div>
+    <div class="stat-card"><div class="stat-num" id="st-sessions">—</div><div class="stat-lbl">{{ t('metrics.sessions') }}</div></div>
+    <div class="stat-card"><div class="stat-num" id="st-play">—</div><div class="stat-lbl">{{ t('metrics.time_played') }}</div></div>
+    <div class="stat-card"><div class="stat-num" id="st-peak">—</div><div class="stat-lbl">{{ t('metrics.peak_concurrent_players_2') }}</div></div>
+    <div class="stat-card"><div class="stat-num" id="st-avg">—</div><div class="stat-lbl">{{ t('metrics.average_concurrent_players') }}</div></div>
+  </div>
+
+  {# Online histogram #}
+  <section class="card chart-card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('metrics.online_players_by_interval') }} <span id="hist-mode-label">{{ t('metrics.unique_players_3') }}</span></span>
+      <span class="muted small">{{ t('metrics.interval') }} <span id="hist-bin-label">—</span></span>
+    </div>
+    <div class="card-body">
+      <div class="chart-host" style="height: 220px"><canvas id="chart-hist"></canvas></div>
+    </div>
+  </section>
+
+  {# Sessions Gantt #}
+  <section class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('metrics.player_sessions') }}</span>
+      <span class="muted small" id="sessions-summary">—</span>
+    </div>
+    <div class="card-body">
+      <div class="gantt" id="gantt-host">
+        <div class="muted small">{{ t('metrics.loading') }}</div>
+      </div>
+    </div>
+  </section>
+
+  {# Hardware: CPU and Memory #}
+  <section class="card chart-card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('metrics.container_cpu_usage') }}</span>
+      <span class="muted small">{{ t('metrics.of_host_cpu') }}</span>
+    </div>
+    <div class="card-body">
+      <div class="chart-host" style="height: 200px"><canvas id="chart-cpu"></canvas></div>
+    </div>
+  </section>
+
+  <section class="card chart-card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('metrics.container_memory_usage') }}</span>
+      <span class="muted small">{{ t('metrics.used_rss_like') }}</span>
+    </div>
+    <div class="card-body">
+      <div class="chart-host" style="height: 200px"><canvas id="chart-mem"></canvas></div>
+    </div>
+  </section>
+
+  <div class="muted small" style="margin-top:8px">
+    {{ t('server_tabs.metrics.metrics_are_collected_about_every_30_seconds_while') }}
+  </div>
+</div>
+
+<script nonce="{{ csp_nonce }}" src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const root = document.getElementById('metrics-tab');
+  if (!root) return;
+  const uuid = root.dataset.uuid;
+  const locale = document.documentElement.lang;
+  const clock = new Intl.DateTimeFormat(locale, {hour: '2-digit', minute: '2-digit'});
+  const weekdayClock = new Intl.DateTimeFormat(locale, {weekday: 'short', hour: '2-digit', minute: '2-digit'});
+  const calendarDay = new Intl.DateTimeFormat(locale, {day: '2-digit', month: '2-digit'});
+  const dateTime = new Intl.DateTimeFormat(locale, {dateStyle: 'short', timeStyle: 'medium'});
+  const chartNumber = new Intl.NumberFormat(locale, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const cpuPercent = new Intl.NumberFormat(locale, {style: 'percent', maximumFractionDigits: 1});
+  const byteFormats = ['byte', 'kilobyte', 'megabyte', 'gigabyte', 'terabyte'].map((unit, index) =>
+    new Intl.NumberFormat(locale, {style: 'unit', unit, maximumFractionDigits: index === 0 ? 0 : 1}));
+
+  const state = { range: '1d', mode: 'unique' };
+  const charts = {};
+  let timer = null;
+
+  // ---------- Helpers ----------
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.round(sec));
+    if (sec < 60) return window.rpT('time.seconds_short', {count: sec});
+    const m = Math.floor(sec / 60);
+    if (m < 60) return window.rpT('time.minutes_short', {count: m});
+    const h = Math.floor(m / 60), mm = m % 60;
+    if (h < 24) return window.rpT('metrics.duration_hours_minutes', {hours: h, minutes: mm});
+    const d = Math.floor(h / 24), hh = h % 24;
+    return window.rpT('metrics.duration_days_hours', {days: d, hours: hh});
+  }
+  function fmtBytes(b) {
+    let index = 0;
+    while (b >= 1024 && index < byteFormats.length - 1) { b /= 1024; index++; }
+    return byteFormats[index].format(b || 0);
+  }
+  function tsLabel(ts, rangeSec) {
+    const d = new Date(ts * 1000);
+    if (rangeSec <= 86400) return clock.format(d);
+    if (rangeSec <= 7 * 86400) return weekdayClock.format(d);
+    return calendarDay.format(d);
+  }
+  function rangeLabel(sec) {
+    if (sec <= 3600) return window.rpT('time.minutes_short', {count: Math.round(sec / 60)});
+    if (sec <= 86400) return window.rpT('time.hours_short', {count: Math.round(sec / 3600)});
+    return window.rpT('time.days_short', {count: Math.round(sec / 86400)});
+  }
+  async function getJSON(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  // ---------- Renderers ----------
+  function renderStats(data) {
+    document.getElementById('st-unique').textContent = data.unique;
+    document.getElementById('st-sessions').textContent = data.sessions;
+    document.getElementById('st-play').textContent = fmtDuration(data.play_seconds);
+    document.getElementById('st-peak').textContent = data.peak_concurrent;
+    document.getElementById('st-avg').textContent = chartNumber.format(data.avg_concurrent);
+  }
+
+  function renderHist(data) {
+    document.getElementById('hist-bin-label').textContent = rangeLabel(data.bin_sec);
+    document.getElementById('hist-mode-label').textContent =
+      data.mode === 'unique' ? window.rpT('metrics.unique_players') : window.rpT('metrics.peak_concurrent_players');
+    const labels = data.bins.map(b => tsLabel(b.ts_start, data.range_sec));
+    const values = data.bins.map(b => b.value);
+    const c = charts.hist;
+    if (c) {
+      c.data.labels = labels;
+      c.data.datasets[0].data = values;
+      c.update('none');
+    } else {
+      const ctx = document.getElementById('chart-hist').getContext('2d');
+      charts.hist = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{
+          data: values,
+          backgroundColor: 'rgba(255,140,26,.78)',
+          borderColor: 'rgba(255,140,26,1)',
+          borderWidth: 0,
+          borderRadius: 2,
+        }]},
+        options: {
+          locale, responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#9ba1a8', maxRotation: 0 } },
+            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.06)' },
+                 ticks: { color: '#9ba1a8', precision: 0 } },
+          },
+        },
+      });
+    }
+  }
+
+  function renderGantt(data) {
+    const host = document.getElementById('gantt-host');
+    document.getElementById('sessions-summary').textContent =
+      window.rpT('metrics.sessions_summary', {count: data.sessions.length, range: rangeLabel(data.range_sec)});
+    if (!data.sessions.length) {
+      host.innerHTML = `<div class="empty-state">${window.rpTHtml('metrics.no_player_sessions_in_this_period')}</div>`;
+      return;
+    }
+    const start = data.since;
+    const end = data.now;
+    const span = Math.max(1, end - start);
+    // Группируем по нику и рисуем строку на каждого
+    const byName = new Map();
+    for (const s of data.sessions) {
+      const arr = byName.get(s.name) || [];
+      arr.push(s);
+      byName.set(s.name, arr);
+    }
+    const rows = Array.from(byName.entries()).map(([name, list]) => {
+      list.sort((a, b) => a.joined_at - b.joined_at);
+      const total = list.reduce((acc, s) => acc + s.duration, 0);
+      const segs = list.map(s => {
+        const j = Math.max(s.joined_at, start);
+        const l = Math.min(s.left_at == null ? end : s.left_at, end);
+        const left = ((j - start) / span) * 100;
+        const w = Math.max(0.3, ((l - j) / span) * 100);
+        const live = s.left_at == null ? ' live' : '';
+        const tip = window.rpTHtml('metrics.session_tooltip', {
+          name: s.name,
+          start: dateTime.format(j * 1000),
+          end: s.left_at == null ? window.rpT('metrics.now') : dateTime.format(l * 1000),
+          duration: fmtDuration(s.duration),
+        });
+        return `<div class="gantt-seg${live}" style="left:${left}%;width:${w}%" title="${tip}"></div>`;
+      }).join('');
+      return `
+        <div class="gantt-row">
+          <div class="gantt-name mono">${window.rpEscapeHtml(name)}</div>
+          <div class="gantt-track">${segs}</div>
+          <div class="gantt-total muted small">${window.rpEscapeHtml(fmtDuration(total))}</div>
+        </div>`;
+    }).join('');
+
+    // Шкала времени по верху
+    const ticks = 6;
+    const ticksHtml = Array.from({length: ticks + 1}, (_, i) => {
+      const t = start + (span * i) / ticks;
+      return `<span class="gantt-tick" style="left:${(i/ticks)*100}%">${window.rpEscapeHtml(tsLabel(t, span))}</span>`;
+    }).join('');
+
+    host.innerHTML = `
+      <div class="gantt-axis">${ticksHtml}</div>
+      <div class="gantt-rows">${rows}</div>
+    `;
+  }
+
+  function renderLine(canvasId, label, points, valueKey, formatter, color) {
+    const labels = points.map(p => new Date(p.ts * 1000));
+    const values = points.map(p => p[valueKey]);
+    const c = charts[canvasId];
+    if (c) {
+      c.data.labels = labels;
+      c.data.datasets[0].data = values;
+      c.options.plugins.tooltip.callbacks.label = ctx => formatter(ctx.parsed.y);
+      c.update('none');
+      return;
+    }
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    charts[canvasId] = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{
+        label, data: values,
+        borderColor: color, backgroundColor: color.replace(',1)', ',.18)'),
+        borderWidth: 1.6, tension: 0.25, pointRadius: 0, fill: true,
+      }]},
+      options: {
+        locale, responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            title: points => points.length ? dateTime.format(points[0].parsed.x) : '',
+            label: ctx => formatter(ctx.parsed.y),
+          } },
+        },
+        scales: {
+          x: { type: 'time', grid: { display: false }, ticks: { color: '#9ba1a8', maxTicksLimit: 8 },
+               time: { tooltipFormat: 'yyyy-MM-dd HH:mm' } },
+          y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.06)' },
+               ticks: { color: '#9ba1a8', callback: v => formatter(v) } },
+        },
+      },
+    });
+  }
+
+  // ---------- Loaders ----------
+  async function reload() {
+    const r = state.range;
+    try {
+      const [stats, hist, sess, m] = await Promise.all([
+        getJSON(`/servers/${uuid}/api/stats?range=${r}`),
+        getJSON(`/servers/${uuid}/api/online-hist?range=${r}&mode=${state.mode}`),
+        getJSON(`/servers/${uuid}/api/sessions?range=${r}`),
+        getJSON(`/servers/${uuid}/api/metrics?range=${r}`),
+      ]);
+      renderStats(stats);
+      renderHist(hist);
+      renderGantt(sess);
+      renderLine('chart-cpu', window.rpT('metrics.cpu_percent'), m.points, 'cpu', v => cpuPercent.format(v / 100), 'rgba(255,140,26,1)');
+      renderLine('chart-mem', window.rpT('metrics.memory'), m.points, 'mem', fmtBytes, 'rgba(70,180,140,1)');
+    } catch (e) {
+      console.warn('metrics reload failed', e);
+    }
+  }
+
+  // ---------- Wire UI ----------
+  function activate(group, attr, value) {
+    document.querySelectorAll(`#${group} .seg-btn`).forEach(b => {
+      b.classList.toggle('active', b.dataset[attr] === value);
+    });
+  }
+  document.getElementById('metrics-range').addEventListener('click', e => {
+    const b = e.target.closest('.seg-btn'); if (!b) return;
+    state.range = b.dataset.range;
+    activate('metrics-range', 'range', state.range);
+    reload();
+  });
+  document.getElementById('metrics-mode').addEventListener('click', e => {
+    const b = e.target.closest('.seg-btn'); if (!b) return;
+    state.mode = b.dataset.mode;
+    activate('metrics-mode', 'mode', state.mode);
+    reload();
+  });
+
+  // Подождём пока загрузится Chart.js (CDN), затем грузим адаптер времени.
+  function ensureTimeAdapter(cb) {
+    if (window.Chart && window._chronoLoaded) return cb();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js';
+    s.onload = () => { window._chronoLoaded = true; cb(); };
+    document.head.appendChild(s);
+  }
+
+  ensureTimeAdapter(() => {
+    reload();
+    timer = setInterval(reload, 30000); // авто-обновление в темпе sampler
+  });
+})();
+</script>

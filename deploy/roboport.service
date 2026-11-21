@@ -1,0 +1,58 @@
+[Unit]
+Description=Roboport — Factorio server control panel
+Documentation=file://__PROJECT_DIR__/deploy/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+# StartLimit* живут в [Unit], не в [Service] (systemd 230+). На systemd 245+
+# в [Service] они молча ignore'ятся и сыпят 'Unknown key name' в журнал.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Юзер должен быть в группе docker (или panel запускается под root в LXC).
+# Если у тебя non-root setup: usermod -aG docker __PANEL_USER__.
+User=__PANEL_USER__
+Group=__PANEL_USER__
+
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=-__PROJECT_DIR__/.env
+
+# Host для uvicorn подставляется install.sh из переменной BIND_HOST
+# (default 127.0.0.1 — наружу через nginx; 0.0.0.0 — наружу напрямую).
+# Внутренний auth панели (scrypt+TOTP+CSRF+rate-limit) защищает периметр в обоих
+# случаях; nginx даёт TLS и basic-auth-вторым-слоем для интернет-доступа.
+ExecStart=__PROJECT_DIR__/.venv/bin/python -m uvicorn app.main:app \
+    --host __BIND_HOST__ --port __UVICORN_PORT__ --log-level info \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+# Если процесс крашится — перезапускаем с задержкой; жёсткие циклы не плодим
+# (см. StartLimit* в секции [Unit] выше — на 5 рестартов за 2 мин).
+Restart=on-failure
+RestartSec=5s
+
+# stdout/stderr → journald
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (Linux). На LXC некоторые опции могут конфликтовать с docker.sock.
+#
+# !!! ВАЖНО: ProtectKernel*, ProtectControlGroups, RestrictRealtime убраны !!!
+# Все эти директивы IMPLYA NoNewPrivileges=yes через kernel-level prctl или
+# seccomp filter — это sticky флаги, отменить через NoNewPrivileges=false НЕ
+# получается (filter уже наложен на процесс). С ними sudo из UI-action даёт:
+# `sudo: The "no new privileges" flag is set, which prevents sudo from running as root`.
+#
+# Trade-off минимален: они защищают только если процесс получил CAP_SYS_ADMIN
+# или хочет realtime-приоритет. Наш процесс работает под non-root юзером
+# (без caps) — он физически не может ни /proc/sys писать, ни modules грузить,
+# ни SCHED_FIFO ставить. Реальной защиты не теряем.
+#
+# Sudo NOPASSWD — на whitelist из 6 команд (см. /etc/sudoers.d/roboport-tls),
+# не на всё.
+NoNewPrivileges=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

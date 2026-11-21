@@ -1,0 +1,6 @@
+# Dev/CI зависимости — не нужны в production install.
+# Поставить локально: pip install -r requirements-dev.txt
+# В CI: см. .github/workflows/ci.yml
+
+pytest>=8.0
+httpx>=0.27,<1

@@ -1,0 +1,5 @@
+{% if locale_version %}
+  <link rel="stylesheet" href="/static/css/language.css?v={{ static_v }}">
+  <script nonce="{{ csp_nonce }}" src="/locales/{{ locale_code }}/client.js?v={{ locale_version }}"></script>
+  <script nonce="{{ csp_nonce }}" src="/static/js/language.js?v={{ static_v }}"></script>
+{% endif %}

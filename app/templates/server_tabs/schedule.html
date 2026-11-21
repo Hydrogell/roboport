@@ -1,0 +1,222 @@
+{# Расписание — периодические задачи (save/restart) для этого сервера.
+   Тикает sampler_loop раз в 30 сек, поэтому минимальная гранулярность ≈ полминуты. #}
+
+{% if sched_msg %}<div class="alert alert-ok">{{ sched_msg }}</div>{% endif %}
+{% if sched_err %}<div class="alert alert-err">{{ sched_err }}</div>{% endif %}
+
+<div class="muted small" style="margin-bottom:12px">
+  {{ t('server_tabs.schedule.the_scheduler_checks_for_tasks_about_every_30') }}
+  <code class="mono">every:Nm</code>/<code class="mono">every:Nh</code> {{ t('server_tabs.schedule.every_n_minutes_or_hours') }}
+  <code class="mono">daily:HH:MM</code> {{ t('server_tabs.schedule.daily_at_hh_mm_in_the_local_time') }}
+  <code class="mono">weekly:dow1,dow2,...:HH:MM</code> {{ t('server_tabs.schedule.on_selected_days_of_the_week') }}
+  <b>{{ t('schedule.command') }}</b> {{ t('server_tabs.schedule.runs_an_rcon_command_and_is_skipped_if') }}
+  <b>{{ t('schedule.restart_kind') }}</b> {{ t('server_tabs.schedule.starts_the_server_even_if_it_was_stopped') }} <code class="mono">/server-message</code>.
+</div>
+
+{# ---------- Существующие задачи ---------- #}
+<section class="card" style="margin-bottom:14px">
+  <div class="card-head"><span class="card-head-title">{{ t('schedule.active_tasks') }}</span></div>
+  <div class="card-body">
+    {% if sched_tasks %}
+    <div class="server-table-scroll">
+    <table class="data-table schedule-table">
+      <thead>
+        <tr>
+          <th>{{ t('schedule.type') }}</th>
+          <th>{{ t('schedule.command') }}</th>
+          <th>{{ t('schedule.schedule') }}</th>
+          <th>{{ t('schedule.enabled') }}</th>
+          <th>{{ t('schedule.last_run') }}</th>
+          <th>{{ t('schedule.status') }}</th>
+          <th>{{ t('schedule.actions') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in sched_tasks %}
+        {% set kind_label = t('schedule.command') if task.kind == 'command' else
+                            t('schedule.restart_kind') if task.kind == 'restart' else task.kind %}
+        <tr>
+          <td>
+            {% if task.kind == 'command' %}&gt;_ {% elif task.kind == 'restart' %}↻ {% endif %}{{ kind_label }}
+          </td>
+          <td>
+            {% if task.kind == 'command' and task.command %}<code class="mono">{{ task.command }}</code>
+            {% elif task.kind == 'restart' and task.warn_seconds %}
+              <span class="muted small">{{ t('schedule.warning_lead', seconds=task.warn_seconds) }}</span>
+            {% else %}<span class="muted small">—</span>{% endif %}
+          </td>
+          <td><code class="mono">{{ task.schedule }}</code></td>
+          <td>
+            <form method="post" action="/servers/{{ server.uuid }}/schedule/toggle"
+                  style="display:inline">
+              <input type="hidden" name="task_id" value="{{ task.id }}">
+              <input type="hidden" name="enabled" value="{{ '0' if task.enabled else '1' }}">
+              <button type="submit" class="btn btn-sm">
+                {% if task.enabled %}{{ t('server_tabs.schedule.on') }}{% else %}{{ t('server_tabs.schedule.off') }}{% endif %}
+              </button>
+            </form>
+          </td>
+          <td>
+            {% if task.last_run %}
+              {% set rel = sched_now - task.last_run %}
+              {% if rel < 60 %}{{ t('server_tabs.schedule.rel_seconds_ago', rel=(rel)) }}
+              {% elif rel < 3600 %}{{ t('server_tabs.schedule.value_minutes_ago', value=(rel // 60)) }}
+              {% elif rel < 86400 %}{{ t('server_tabs.schedule.value_h_ago', value=(rel // 3600)) }}
+              {% else %}{{ t('server_tabs.schedule.value_days_ago', value=(rel // 86400)) }}{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if task.last_status == 'ok' %}<span class="status status-online">{{ t('schedule.run_succeeded') }}</span>
+            {% elif task.last_status == 'skipped: not running' %}
+              <span class="muted small">{{ t('schedule.run_skipped_offline') }}</span>
+            {% elif task.last_status and task.last_status.startswith('error') %}
+              <span class="status status-error" title="{{ task.last_status }}">{{ t('schedule.run_failed') }}</span>
+            {% elif task.last_status %}<span class="muted small">{{ task.last_status }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <form method="post" action="/servers/{{ server.uuid }}/schedule/delete"
+                  style="display:inline"
+                  data-confirm="{{ t('schedule.delete_confirm', kind=kind_label, schedule=task.schedule) }}">
+              <input type="hidden" name="task_id" value="{{ task.id }}">
+              <button type="submit" class="btn btn-sm btn-danger">🗑</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="muted small">{{ t('schedule.no_scheduled_tasks_yet_add_one_below') }}</div>
+    {% endif %}
+  </div>
+</section>
+
+{# ---------- Добавление задачи ---------- #}
+<section class="card">
+  <div class="card-head"><span class="card-head-title">{{ t('schedule.new_task') }}</span></div>
+  <div class="card-body">
+    <form method="post" action="/servers/{{ server.uuid }}/schedule/add" class="form" id="sched-add">
+      <div class="form-row">
+        <label class="field">
+          <span class="field-label">{{ t('schedule.task_type') }}</span>
+          <select name="kind" class="input" id="sched-kind">
+            <option value="command">{{ t('schedule.gt_command_run_an_rcon_command') }}</option>
+            <option value="restart">{{ t('schedule.restart_stop_and_start_the_container') }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('schedule.schedule_type') }}</span>
+          <select name="schedule_type" class="input" id="sched-type">
+            <option value="every">{{ t('schedule.every_n_minutes_or_hours_every_nm_nh') }}</option>
+            <option value="daily">{{ t('schedule.every_day_at_hh_mm_daily') }}</option>
+            <option value="weekly">{{ t('schedule.on_selected_days_weekly') }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="form-row" id="sched-command-row">
+        <label class="field" style="flex:1">
+          <span class="field-label">{{ t('schedule.rcon_command') }}</span>
+          <input type="text" name="command" maxlength="500" class="input mono"
+                 value="/server-save" placeholder="/server-save">
+          <span class="field-hint">
+            {{ t('schedule.command_execution', save='/server-save', admins='/admins',
+                 lua='/c game.print("backup")', status=t('schedule.run_skipped_offline')) }}
+          </span>
+        </label>
+      </div>
+
+      <div class="form-row" id="sched-every-row">
+        <label class="field">
+          <span class="field-label">{{ t('schedule.interval') }}</span>
+          <input type="number" name="every_n" min="1" max="9999" value="30" class="input">
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('schedule.unit') }}</span>
+          <select name="every_unit" class="input">
+            <option value="m">{{ t('schedule.minutes') }}</option>
+            <option value="h">{{ t('schedule.hours') }}</option>
+          </select>
+          <span class="field-hint">{{ t('schedule.minimum_1_minute_for_example_30m_or_6h') }}</span>
+        </label>
+      </div>
+
+      <div class="form-row" id="sched-daily-row" style="display:none">
+        <label class="field">
+          <span class="field-label">{{ t('schedule.time_hh_mm_local_time') }}</span>
+          <input type="time" name="daily_time" value="03:00" class="input">
+          <span class="field-hint">{{ t('schedule.for_example_03_00_for_an_overnight_restart') }}</span>
+        </label>
+      </div>
+
+      <div class="form-row" id="sched-weekly-row" style="display:none">
+        <label class="field" style="flex:1">
+          <span class="field-label">{{ t('schedule.days_of_the_week') }}</span>
+          <div class="dow-row" style="display:flex; gap:6px; flex-wrap:wrap; padding-top:4px">
+            {% for code, label in sched_weekdays %}
+            <label class="dow-pill" style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border:1px solid var(--border-1); border-radius:14px; cursor:pointer">
+              <input type="checkbox" name="weekly_dows" value="{{ code }}" class="cb-classic">
+              <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <span class="field-hint">{{ t('schedule.select_one_or_more_days') }}</span>
+        </label>
+        <label class="field" style="max-width:160px">
+          <span class="field-label">{{ t('schedule.time_hh_mm') }}</span>
+          <input type="time" name="weekly_time" value="03:00" class="input">
+        </label>
+      </div>
+
+      <div class="form-row" id="sched-warn-row" style="display:none">
+        <label class="field">
+          <span class="field-label">{{ t('schedule.warn_players_before_restarting') }}</span>
+          <select name="warn_seconds" class="input">
+            <option value="0">{{ t('schedule.no_warning') }}</option>
+            <option value="30">{{ t('schedule.30_seconds') }}</option>
+            <option value="60" selected>{{ t('schedule.60_seconds') }}</option>
+            <option value="120">{{ t('schedule.2_minutes') }}</option>
+            <option value="300">{{ t('schedule.5_minutes') }}</option>
+          </select>
+          <span class="field-hint">
+            {{ t('schedule.restart_warning_hint', command='/server-message') }}
+          </span>
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">{{ t('schedule.add') }}</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const typeSel = document.getElementById('sched-type');
+  const everyRow = document.getElementById('sched-every-row');
+  const dailyRow = document.getElementById('sched-daily-row');
+  const weeklyRow = document.getElementById('sched-weekly-row');
+  const kindSel = document.getElementById('sched-kind');
+  const cmdRow = document.getElementById('sched-command-row');
+  const warnRow = document.getElementById('sched-warn-row');
+  function syncType() {
+    const v = typeSel.value;
+    everyRow.style.display  = v === 'every'  ? '' : 'none';
+    dailyRow.style.display  = v === 'daily'  ? '' : 'none';
+    weeklyRow.style.display = v === 'weekly' ? '' : 'none';
+  }
+  function syncKind() {
+    const isCmd = kindSel.value === 'command';
+    cmdRow.style.display  = isCmd ? '' : 'none';
+    warnRow.style.display = isCmd ? 'none' : '';
+  }
+  typeSel.addEventListener('change', syncType);
+  kindSel.addEventListener('change', syncKind);
+  syncType();
+  syncKind();
+})();
+</script>

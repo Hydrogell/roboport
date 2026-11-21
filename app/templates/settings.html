@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.settings') }} — Roboport{% endblock %}
+
+{% block page_styles %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/settings.css') }}?v={{ static_v }}">
+{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+  <h1 class="page-title">{{ t('nav.settings') }}</h1>
+
+  {% if msg %}<p class="alert alert-ok" role="status">{{ msg }}</p>{% endif %}
+  {% if err %}<p class="alert alert-err" role="alert">{{ err }}</p>{% endif %}
+
+  {% set tabs = [
+    ('general', t('settings.general')), ('access', t('settings.network')), ('security', t('settings.security')),
+    ('integrations', t('settings.integrations')), ('updates', t('settings.updates')), ('audit', t('settings.audit'))
+  ] %}
+  <nav class="settings-tabs" aria-label="{{ t('settings.sections') }}">
+    {% for slug, label in tabs %}
+      <a id="tab-{{ slug }}" href="#{{ slug }}" data-tab="{{ slug }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% for slug, label in tabs %}
+    <section class="settings-tab-panel" id="{{ slug }}" data-tab-panel="{{ slug }}"
+             aria-labelledby="tab-{{ slug }}">
+      {% include "settings/" ~ slug ~ ".html" %}
+    </section>
+  {% endfor %}
+</div>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', path='js/settings.js') }}?v={{ static_v }}"></script>
+{% endblock %}

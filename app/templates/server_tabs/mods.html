@@ -1,0 +1,567 @@
+{# Менеджер модов: установленные + поиск/установка с mod portal + загрузка локального .zip.
+   Папка модов сервера: servers/<uuid>/mods/  (изолированная). #}
+
+<div class="mods-wrap">
+
+  <div class="mods-header">
+    <div class="muted small">
+      {{ t('server_tabs.mods.mods_folder') }} <code class="mono">servers/{{ server.uuid }}/mods/</code> {{ t('server_tabs.mods.factorio_version') }} <span class="badge">{{ mods_factorio_v }}</span>
+    </div>
+    <div class="muted small">
+      {{ t('server_tabs.mods.mod_portal_cache') }}
+      {% if mods_cache_count %}
+        {{ t('server_tabs.mods.mods_cache_count_mods_last_synced_value_h', mods_cache_count=(mods_cache_count), value=(((mods_now - mods_cache_synced_at) // 3600) if mods_now else '?')) }}
+      {% else %}
+        {{ t('server_tabs.mods.empty_click_sync_cache') }}
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('server_tabs.mods.installed_mods_installed', mods_installed=(mods_installed|length)) }}</span>
+      <div class="mod-install-actions">
+        <button type="button" class="btn btn-sm" id="mods-check-updates"
+                title="{{ t('mods.compare_installed_mods_with_the_mod_portal_cache') }}">
+          {{ t('server_tabs.mods.check_for_updates') }}
+        </button>
+        <form method="post" action="/servers/{{ server.uuid }}/mods/upload"
+              enctype="multipart/form-data" class="inline-form"
+              data-loading="{{ t('mods.downloading_mod') }}">
+          <input type="file" name="file" accept=".zip" class="input input-sm" required>
+          <button type="submit" class="btn btn-sm">{{ t('mods.upload_zip') }}</button>
+        </form>
+      </div>
+    </div>
+    <div class="card-body">
+      {% if not mods_installed %}
+        <div class="empty-state">{{ t('mods.no_mods_installed_search_below_or_upload_a') }}</div>
+      {% else %}
+      <table class="data-table mods-table">
+        <thead>
+          <tr>
+            <th>{{ t('mods.enabled') }}</th>
+            <th>{{ t('mods.mod') }}</th>
+            <th>{{ t('mods.version') }}</th>
+            <th>Factorio</th>
+            <th>{{ t('mods.size') }}</th>
+            <th class="actions-col">{{ t('mods.actions') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in mods_installed %}
+          <tr class="{% if not m.enabled %}row-disabled{% endif %}">
+            <td>
+              {% if m.name == 'base' %}
+                <input type="checkbox" checked disabled title="{{ t('mods.the_base_mod_cannot_be_disabled') }}">
+              {% else %}
+                <form method="post" action="/servers/{{ server.uuid }}/mods/toggle"
+                      style="display:inline" id="toggle-{{ m.name|replace(' ','_') }}">
+                  <input type="hidden" name="name" value="{{ m.name }}">
+                  <input type="hidden" name="enabled" value="{{ '0' if m.enabled else '1' }}">
+                  <input type="checkbox" {% if m.enabled %}checked{% endif %}
+                         data-auto-submit
+                         title="{% if m.enabled %}{{ t('settings.integrations.disable') }}{% else %}{{ t('settings.integrations.enable') }}{% endif %}">
+                </form>
+              {% endif %}
+            </td>
+            <td>
+              <div class="mod-name">{{ m.title }}</div>
+              <div class="muted small mono">{{ t('server_tabs.mods.label_by_author', label=(m.name), author=(m.author)) }}</div>
+              {% if m.deps_required %}
+                <div class="muted small">{{ t('mods.required_dependencies', dependencies=m.deps_required|map(attribute='name')|join(', ')) }}</div>
+              {% endif %}
+            </td>
+            <td class="mono">
+              {{ m.version }}
+              {% if m.has_update %}
+                <span class="badge badge-warning" title="{{ t('mods.cached_version_hint', version=m.latest_in_cache) }}">↑ {{ m.latest_in_cache }}</span>
+              {% endif %}
+            </td>
+            <td class="mono">{{ m.factorio_version }}</td>
+            <td class="num muted">{{ (m.size / 1024)|round(0)|int }} KB</td>
+            <td class="actions">
+              <form method="post" action="/servers/{{ server.uuid }}/mods/install" style="display:inline"
+                    data-loading="{{ t('mods.downloading_mod_hint') }}"
+                    data-loading-hint="{{ t('mods.downloading_the_mod_from_mods_factorio_com_large') }}"
+                    title="{% if m.has_update %}{{ t('server_tabs.mods.update_to_latest_in_cache', latest_in_cache=(m.latest_in_cache)) }}{% else %}{{ t('server_tabs.mods.download_the_latest_release_again') }}{% endif %}">
+                <input type="hidden" name="name" value="{{ m.name }}">
+                <button type="submit" class="icon-btn">
+                  {% if m.has_update %}↑{% else %}↻{% endif %}
+                </button>
+              </form>
+              <form method="post" action="/servers/{{ server.uuid }}/mods/remove" style="display:inline"
+                    data-confirm="{{ t('mods.delete_confirm', title=m.title) }}">
+                <input type="hidden" name="filename" value="{{ m.filename }}">
+                <button type="submit" class="icon-btn danger" title="{{ t('mods.delete') }}">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('mods.search_the_mod_portal') }}</span>
+      <form method="post" action="/servers/{{ server.uuid }}/mods/sync" class="inline-form"
+            data-loading="{{ t('mods.syncing_the_mod_cache') }}"
+            data-loading-hint="{{ t('mods.downloading_the_catalog_from_mods_factorio_com_about') }}">
+        <button type="submit" class="btn btn-sm">{{ t('mods.sync_cache') }}</button>
+      </form>
+    </div>
+    <div class="card-body">
+      <form method="get" action="" class="inline-form" style="margin-bottom:12px">
+        <input id="mod-search" type="text" name="q" value="{{ mods_query }}" placeholder="{{ t('mods.mod_name') }}"
+               class="input" style="flex:1; max-width:420px">
+        <button type="submit" class="btn">{{ t('mods.search') }}</button>
+        {% if mods_query %}
+          <a href="/servers/{{ server.uuid }}/mods" class="btn btn-sm">{{ t('mods.clear') }}</a>
+        {% endif %}
+      </form>
+
+      {% if mods_query and not mods_results %}
+        <div class="empty-state">
+          {% if not mods_cache_count %}
+            {{ t('server_tabs.mods.the_cache_is_empty_click') }} <strong>{{ t('mods.sync_cache_label') }}</strong> {{ t('server_tabs.mods.at_the_top_right_takes_about_30_seconds') }}
+          {% else %}
+            {{ t('server_tabs.mods.no_results_for_mods_query_in_factorio_mods', mods_query=(mods_query), mods_factorio_v=(mods_factorio_v)) }}
+          {% endif %}
+        </div>
+      {% elif mods_query %}
+        <table class="data-table mods-table">
+          <thead>
+            <tr>
+              <th>{{ t('mods.mod_label') }}</th>
+              <th class="num">{{ t('mods.downloads') }}</th>
+              <th>{{ t('mods.cached_version') }}</th>
+              <th class="actions-col">{{ t('mods.actions_label') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in mods_results %}
+            <tr>
+              <td>
+                <div class="mod-name">{{ m.title }}</div>
+                <div class="muted small mono">{{ m.name }}{% if m.owner %} {{ t('server_tabs.mods.by_owner', owner=(m.owner)) }}{% endif %}</div>
+                {% if m.summary %}<div class="muted small">{{ m.summary[:160] }}{% if m.summary|length > 160 %}…{% endif %}</div>{% endif %}
+              </td>
+              <td class="num muted">{{ '{:,}'.format(m.downloads_count or 0).replace(',', ' ') }}</td>
+              <td class="mono">
+                {% set lr = m.latest_release or {} %}
+                {{ lr.version or '?' }}
+                {% if m.compat_factorio %}
+                  {% if m.is_compatible %}
+                    <span class="badge badge-ok" title="{{ t('server_tabs.mods.factorio_compat_factorio_matches_your_server_version', compat_factorio=(m.compat_factorio)) }}">✓ {{ m.compat_factorio }}</span>
+                  {% else %}
+                    <span class="badge badge-warning" title="{{ t('mods.version_mismatch_hint', supported=m.compat_factorio, installed=mods_factorio_v) }}">{{ t('server_tabs.mods.compat_factorio_only', compat_factorio=m.compat_factorio) }}</span>
+                  {% endif %}
+                {% endif %}
+              </td>
+              <td class="actions">
+                <form method="post" action="/servers/{{ server.uuid }}/mods/install" style="display:inline"
+                      data-loading="{{ t('mods.downloading_mod_2') }}"
+                      data-loading-hint="{{ t('mods.downloading_the_mod_from_mods_factorio_com_large_hint') }}"
+                      {% if not m.is_compatible %}data-confirm="{{ t('mods.incompatible_confirm', mod=m.compat_factorio, server=mods_factorio_v) }}"{% endif %}>
+                  <input type="hidden" name="name" value="{{ m.name }}">
+                  <button type="submit" class="btn btn-sm {% if m.is_compatible %}btn-primary{% endif %}">{{ t('mods.install') }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if mods_results|length == 25 %}
+          <div class="muted small" style="margin-top:8px">{{ t('mods.showing_the_25_most_downloaded_matches_refine_your') }}</div>
+        {% endif %}
+      {% else %}
+        <div class="muted small">{{ t('mods.search_uses_the_local_cache_sync_the_cache') }}</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('mods.import') }}</span>
+      <span class="muted small">{{ t('mods.zip_mods_zip_saves_or_mod_list_json') }}</span>
+    </div>
+    <div class="card-body">
+      <div id="dropzone" class="dropzone" tabindex="0" role="button"
+           aria-label="{{ t('mods.drop_files_here_or_click_to_browse') }}">
+        <input type="file" id="dropzone-input" multiple accept=".zip,.json,application/json" hidden>
+        <div class="dropzone-content">
+          <div class="dropzone-icon">⬆</div>
+          <div class="dropzone-title">{{ t('mods.drop_files_here_or_click_to_browse_label') }}</div>
+          <div class="muted small">
+            {{ t('server_tabs.mods.you_can_select_several_files_roboport_handles_each') }}
+            <code class="mono">saves/</code>.
+          </div>
+        </div>
+      </div>
+      <div id="dropzone-results" class="dropzone-results" hidden></div>
+    </div>
+  </section>
+
+  {# ---------- Модалка «Проверить обновления» ---------- #}
+  <div id="updates-modal" class="modal" hidden aria-hidden="true">
+    <div class="modal-card" style="max-width:680px">
+      <div class="modal-head">
+        <span class="modal-title">{{ t('mods.check_for_mod_updates') }}</span>
+        <button class="modal-close" id="updates-close" type="button" aria-label="{{ t('mods.close') }}">✕</button>
+      </div>
+      <div class="modal-body" id="updates-body" style="padding:14px;min-height:120px">
+        <div class="muted">{{ t('mods.checking_the_cache') }}</div>
+      </div>
+      <div class="modal-foot">
+        <span class="modal-status" id="updates-status">&nbsp;</span>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="updates-cancel">{{ t('mods.close_label') }}</button>
+          <button type="button" class="btn" id="updates-resync"
+                  title="{{ t('mods.download_the_latest_catalog_from_mods_factorio_com') }}">
+            {{ t('server_tabs.mods.sync_cache') }}
+          </button>
+          <button type="button" class="btn btn-primary" id="updates-apply" disabled>
+            {{ t('mods.update_selected_message') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script nonce="{{ csp_nonce }}">
+if (matchMedia('(min-width: 901px) and (pointer: fine)').matches) document.getElementById('mod-search').focus();
+(function () {
+  const uuid = "{{ server.uuid }}";
+  const zone = document.getElementById('dropzone');
+  const input = document.getElementById('dropzone-input');
+  const results = document.getElementById('dropzone-results');
+  if (!zone) return;
+
+  // Открыть проводник по клику. Игнорим клики по самому input чтобы не зациклиться.
+  zone.addEventListener('click', e => {
+    if (e.target !== input) input.click();
+  });
+  zone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+  });
+
+  let dragDepth = 0;
+  zone.addEventListener('dragenter', e => {
+    e.preventDefault(); dragDepth++; zone.classList.add('dropzone-active');
+  });
+  zone.addEventListener('dragover', e => { e.preventDefault(); });
+  zone.addEventListener('dragleave', e => {
+    e.preventDefault(); dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) zone.classList.remove('dropzone-active');
+  });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); dragDepth = 0;
+    zone.classList.remove('dropzone-active');
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+  });
+  input.addEventListener('change', () => handleFiles(input.files));
+
+  function appendRow(name) {
+    if (results.hidden) results.hidden = false;
+    const row = document.createElement('div');
+    row.className = 'dropzone-row pending';
+    row.innerHTML = `
+      <span class="dz-status">⏳</span>
+      <span class="dz-name mono"></span>
+      <span class="dz-msg muted small">${window.rpTHtml('mods.loading')}</span>
+    `;
+    row.querySelector('.dz-name').textContent = name;
+    results.appendChild(row);
+    return row;
+  }
+
+  function setRow(row, ok, kind, msg) {
+    row.classList.remove('pending');
+    row.classList.add(ok ? 'ok' : 'fail');
+    row.querySelector('.dz-status').textContent = ok ? '✓' : '✕';
+    const m = row.querySelector('.dz-msg');
+    m.textContent = msg;
+    m.className = 'dz-msg ' + (ok ? '' : 'text-danger');
+    if (kind) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      const labels = {
+        modlist: window.rpT('mods.import_kind_modlist'),
+        save: window.rpT('mods.import_kind_save'),
+        mod: window.rpT('mods.import_kind_mod'),
+        unknown: window.rpT('mods.import_kind_unknown'),
+      };
+      badge.textContent = Object.hasOwn(labels, kind) ? labels[kind] : kind;
+      row.insertBefore(badge, m);
+    }
+  }
+
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+    // sequential — не уложить портал параллельными зависимыми запросами,
+    // и юзер видит понятную ленту "что после чего"
+    for (const f of files) {
+      const row = appendRow(f.name);
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const r = await fetch(`/servers/${uuid}/mods/import`, { method: 'POST', body: fd });
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        const data = await r.json();
+        setRow(row, !!data.ok, data.kind, data.message || '—');
+      } catch (e) {
+        setRow(row, false, null, window.rpT('mods.import_failed', {error: e.message}));
+      }
+    }
+    // дать секунду на чтение последней строки и обновить страницу,
+    // чтобы установленный список и баджи отрисовались актуально
+    setTimeout(() => location.reload(), 1500);
+    input.value = '';  // позволить перетащить тот же файл снова
+  }
+})();
+</script>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Модалка «Проверить обновления»: GET /mods/updates-check → JSON со списком,
+  // рендерим чекбоксы, кнопка применяет sequentially POST /mods/install для
+  // выбранных. Sequential — потому что каждая установка дёргает mod portal
+  // (download), параллельные качали бы дублирующий трафик и могли бы упереться
+  // в rate-limit. Прогресс показываем в реальном времени.
+  const uuid = "{{ server.uuid }}";
+  const btn = document.getElementById('mods-check-updates');
+  const modal = document.getElementById('updates-modal');
+  const body = document.getElementById('updates-body');
+  const status = document.getElementById('updates-status');
+  const apply = document.getElementById('updates-apply');
+  const cancel = document.getElementById('updates-cancel');
+  const closeBtn = document.getElementById('updates-close');
+  if (!btn) return;
+
+  let updates = [];   // [{name, title, current, latest, size_kb}]
+  let busy = false;
+
+  async function open() {
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    body.innerHTML = `<div class="muted">${window.rpTHtml('mods.checking_the_cache_label')}</div>`;
+    status.textContent = '';
+    apply.disabled = true;
+
+    // Сначала быстро глянем состояние кэша. Если он stale (>24ч) или вообще
+    // пустой — автоматически синкаем перед списком обновлений: иначе юзер
+    // увидит «всё актуально» по старым данным.
+    let probe;
+    try {
+      const r = await fetch(`/servers/${uuid}/mods/updates-check`,
+        { credentials: 'same-origin', cache: 'no-store' });
+      probe = r.ok ? await r.json() : null;
+    } catch { probe = null; }
+
+    const cache = (probe && probe.cache) || {};
+    const needSync = !cache.synced_at || cache.stale;
+    if (needSync) {
+      const reason = cache.synced_at
+        ? window.rpTHtml('mods.sync_stale_cache', {date: formatSyncDate(cache.synced_at)})
+        : window.rpTHtml('mods.sync_empty_cache');
+      body.innerHTML = `
+        <div class="muted small" style="margin-bottom:10px">${reason}</div>
+        <div style="background:rgba(255,140,26,.06);border:1px solid var(--border-1);
+                    border-radius:6px;padding:14px;text-align:center">
+          <div style="font-size:13px;margin-bottom:8px">${window.rpTHtml('mods.downloading_the_catalog_from_mods_factorio_com')}</div>
+          <div class="muted small">${window.rpTHtml('mods.about_12_mb_of_json_it_usually_takes')}</div>
+        </div>`;
+      const ok = await syncCache();
+      if (!ok) return;  // показали ошибку в syncCache
+    }
+    fetchUpdates();
+  }
+
+  async function syncCache() {
+    try {
+      const r = await fetch(`/servers/${uuid}/mods/sync`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!r.ok) {
+        let err;
+        try { err = (await r.json()).error || `HTTP ${r.status}`; }
+        catch { err = `HTTP ${r.status}`; }
+        body.innerHTML = `<div class="alert-pre">${window.rpTHtml('mods.cache_sync_failed', {error: err})}<br>
+          <span class="muted small">${window.rpTHtml('mods.the_mod_portal_may_be_unavailable_click_sync')}</span></div>`;
+        return false;
+      }
+      return true;
+    } catch (e) {
+      body.innerHTML = `<div class="alert-pre">${window.rpTHtml('mods.network_error', {error: e.message})}</div>`;
+      return false;
+    }
+  }
+  function close() {
+    if (busy && !confirm(window.rpT('mods.cancel_the_update_in_progress'))) return;
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  async function fetchUpdates() {
+    let data;
+    try {
+      const r = await fetch(`/servers/${uuid}/mods/updates-check`,
+        { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      data = await r.json();
+    } catch (e) {
+      body.innerHTML = `<div class="alert-pre">${window.rpTHtml('mods.update_check_failed', {error: e.message})}</div>`;
+      return;
+    }
+    updates = data.updates || [];
+    renderList(data);
+  }
+
+  function formatSyncDate(timestamp) {
+    return new Date(timestamp * 1000).toLocaleString(document.documentElement.lang);
+  }
+
+  function renderList(data) {
+    const cache = data.cache || {};
+    const ts = cache.synced_at
+      ? formatSyncDate(cache.synced_at)
+      : window.rpT('mods.never');
+    let html = `<div class="muted small" style="margin-bottom:10px">
+      ${window.rpTHtml('mods.cache_last_synced', {date: ts})}
+      ${cache.stale ? `· <span style="color:var(--orange,#ff8c1a)">${window.rpTHtml('mods.older_than_24_h_click_sync_cache_to')}</span>` : ''}
+      · Factorio <code class="mono">${window.rpEscapeHtml(data.factorio_version)}</code>
+    </div>`;
+    if (!updates.length) {
+      html += `<div class="empty-state">${window.rpTHtml('mods.all_mods_are_up_to_date')}<br>
+        <span class="muted small">${window.rpTHtml('mods.refresh_cache_hint')}</span></div>`;
+      body.innerHTML = html;
+      apply.disabled = true;
+      return;
+    }
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span class="muted small">${window.rpTHtml('mods.updates_found', {count: updates.length})}</span>
+      <span style="display:flex;gap:6px">
+        <button type="button" class="btn btn-sm" id="upd-all">${window.rpTHtml('mods.select_all')}</button>
+        <button type="button" class="btn btn-sm" id="upd-none">${window.rpTHtml('mods.clear_selection')}</button>
+      </span>
+    </div>`;
+    html += `<table class="data-table"><thead><tr>
+      <th style="width:30px"></th><th>${window.rpTHtml('mods.mod_2')}</th>
+      <th>${window.rpTHtml('mods.current')}</th><th>${window.rpTHtml('mods.new')}</th>
+      <th class="num">${window.rpTHtml('mods.size_label')}</th></tr></thead><tbody>`;
+    updates.forEach((u, i) => {
+      html += `<tr data-idx="${i}">
+        <td><input type="checkbox" class="upd-cb" checked data-idx="${i}" aria-label="${window.rpTHtml('mods.select_update', {title: u.title})}"></td>
+        <td>
+          <div class="mod-name">${window.rpEscapeHtml(u.title)}</div>
+          <div class="muted small mono">${window.rpEscapeHtml(u.name)}</div>
+        </td>
+        <td class="mono">${window.rpEscapeHtml(u.current)}</td>
+        <td class="mono" style="color:var(--orange-soft,#ffc933)">↑ ${window.rpEscapeHtml(u.latest)}</td>
+        <td class="num muted">${u.size_kb ? window.rpTHtml('size.kilobytes', {count: u.size_kb}) : '—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+    apply.disabled = false;
+    document.getElementById('upd-all').addEventListener('click',
+      () => body.querySelectorAll('.upd-cb').forEach(c => c.checked = true));
+    document.getElementById('upd-none').addEventListener('click',
+      () => body.querySelectorAll('.upd-cb').forEach(c => c.checked = false));
+    body.addEventListener('change', updateApplyState);
+    updateApplyState();
+  }
+
+  function updateApplyState() {
+    const n = body.querySelectorAll('.upd-cb:checked').length;
+    apply.disabled = n === 0;
+    apply.textContent = n > 0 ? window.rpT('mods.update_selected', {count: n}) : window.rpT('mods.update_selected_message');
+  }
+
+  async function runUpdates() {
+    const selected = Array.from(body.querySelectorAll('.upd-cb:checked'))
+      .map(c => updates[parseInt(c.dataset.idx)]);
+    if (!selected.length) return;
+    busy = true;
+    apply.disabled = true; cancel.disabled = true; closeBtn.disabled = true;
+
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrf = csrfMeta ? csrfMeta.content : '';
+    let okCount = 0, failCount = 0;
+    for (let i = 0; i < selected.length; i++) {
+      const u = selected[i];
+      const row = body.querySelector(`tr[data-idx="${updates.indexOf(u)}"]`);
+      if (row) row.style.background = 'rgba(255,140,26,.10)';
+      status.textContent = window.rpT('mods.update_downloading', {
+        current: i + 1, total: selected.length, name: u.name, version: u.latest,
+      });
+      const fd = new FormData();
+      fd.append('name', u.name);
+      if (csrf) fd.append('csrf_token', csrf);
+      try {
+        const r = await fetch(`/servers/${uuid}/mods/install`, {
+          method: 'POST', body: fd, credentials: 'same-origin',
+          // 303 redirect от роута — просто игнорируем body
+          redirect: 'follow',
+        });
+        if (!r.ok && r.status !== 303 && r.type !== 'opaqueredirect') {
+          throw new Error(`HTTP ${r.status}`);
+        }
+        if (row) row.style.background = 'rgba(80,200,120,.18)';
+        okCount++;
+      } catch (e) {
+        if (row) row.style.background = 'rgba(255,80,80,.18)';
+        failCount++;
+        const cb = row && row.querySelector('.upd-cb');
+        if (cb) cb.parentElement.innerHTML = `<span title="${window.rpEscapeHtml(e.message)}" style="color:#f55">✗</span>`;
+      }
+    }
+    busy = false;
+    cancel.disabled = false; closeBtn.disabled = false;
+    status.textContent = window.rpT('mods.update_result', {updated: okCount, failed: failCount});
+    if (okCount) status.textContent += ' ' + window.rpT('mods.restart_the_server_to_apply_the_changes');
+    apply.textContent = window.rpT('mods.done');
+    apply.disabled = true;
+    // Если хоть один обновился — релоад страницы через 2 сек чтобы
+    // отобразить новые версии в таблице установленных.
+    if (okCount > 0) {
+      setTimeout(() => { if (modal.hidden) location.reload(); }, 1500);
+    }
+  }
+
+  async function manualResync() {
+    if (busy) return;
+    apply.disabled = true;
+    body.innerHTML = `
+      <div class="muted small" style="margin-bottom:10px">${window.rpTHtml('mods.syncing_the_cache')}</div>
+      <div style="background:rgba(255,140,26,.06);border:1px solid var(--border-1);
+                  border-radius:6px;padding:14px;text-align:center">
+        <div style="font-size:13px;margin-bottom:8px">${window.rpTHtml('mods.downloading_the_catalog_from_mods_factorio_com_label')}</div>
+        <div class="muted small">${window.rpTHtml('mods.about_12_mb_of_json_20_40_seconds')}</div>
+      </div>`;
+    if (await syncCache()) fetchUpdates();
+  }
+
+  btn.addEventListener('click', open);
+  cancel.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+  modal.addEventListener('mousedown', e => { if (e.target === modal) close(); });
+  apply.addEventListener('click', runUpdates);
+  document.getElementById('updates-resync').addEventListener('click', manualResync);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !modal.hidden) close();
+  });
+})();
+</script>
+
+  <div class="muted small">
+    {{ t('mods.apply_changes_hint', path='mods/', file='mod-list.json') }}
+  </div>
+</div>

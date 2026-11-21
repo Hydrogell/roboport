@@ -1,0 +1,59 @@
+{# Meta-card сервера: состояние, версия, порт, игроки, runtime, контейнер,
+   started_at, exit code. Контейнер id='srv-meta-grid' — JS на server_detail
+   свопает innerHTML каждые 5с. Источник правды для full-page и для polling'а. #}
+{% set rt_state = rt_status.state.value if rt_status else 'unknown' %}
+{% set is_running = rt_state == 'running' %}
+{% set is_starting = rt_state == 'starting' %}
+<details class="server-meta-details" id="srv-meta-grid" data-rt-state="{{ rt_state }}" open>
+  <summary>
+    <span class="server-meta-status">
+      {% if is_running %}<span class="status status-online">{{ t('server_meta.online') }}</span>
+      {% elif is_starting %}<span class="status status-online">{{ t('server_meta.starting') }}</span>
+      {% elif rt_error %}<span class="status status-error">{{ t('server_meta.runtime_error') }}</span>
+      {% else %}<span class="status status-offline">{{ t('server_meta.offline') }}</span>{% endif %}
+    </span>
+    <span class="server-meta-brief">{{ server.version }} · {{ server.port }} / UDP</span>
+  </summary>
+  <div class="meta-grid">
+  <div>
+    <div class="meta-row server-meta-uuid">
+      <span class="meta-label">UUID</span><code class="mono confidential">{{ server.uuid }}</code>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">{{ t('server_meta.status') }}</span>
+      {% if is_running %}<span class="status status-online">{{ t('server_meta.online') }}</span>
+      {% elif is_starting %}<span class="status status-online">{{ t('server_meta.starting') }}</span>
+      {% elif rt_error %}<span class="status status-error">{{ t('server_meta.runtime_error') }}</span>
+      {% else %}<span class="status status-offline">{{ t('server_meta.offline') }}</span>{% endif %}
+    </div>
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.version') }}</span> {{ server.version }}</div>
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.port') }}</span> {{ server.port }} / UDP</div>
+    <div class="meta-row" title="{{ t('server.storage_size_hint', path='servers/' ~ server.uuid ~ '/') }}">
+      <span class="meta-label">{{ t('server_meta.size') }}</span> {{ dir_size_h or '—' }}
+    </div>
+    {% if is_running %}
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.players') }}</span>
+      {{ players_online_count }}/{% if max_players and max_players > 0 %}{{ max_players }}{% else %}∞{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  <div>
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.runtime_label') }}</span> {{ server.runtime }}</div>
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.created') }}</span> {{ server.created_at | humantime }}</div>
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.container') }}</span>
+      <code class="mono confidential">{{ (rt_status.container_id[:12] if rt_status and rt_status.container_id else (server.container_id or '—')) }}</code>
+    </div>
+    {% if rt_status and rt_status.started_at %}
+    <div class="meta-row"><span class="meta-label">{{ t('server_meta.started') }}</span> {{ rt_status.started_at | humantime }}</div>
+    {% endif %}
+    {% if rt_status and rt_status.exit_code is not none and rt_status.exit_code != 0 %}
+    <div class="meta-row">
+      <span class="meta-label">{{ t('server_meta.exit_code_label') }}</span>
+      <span class="status status-error" title="{{ t('server_meta.the_container_exited_with_a_nonzero_code_check') }}">
+        {{ rt_status.exit_code }}{% if rt_status.detail %} · {{ rt_status.detail }}{% endif %}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+  </div>
+</details>

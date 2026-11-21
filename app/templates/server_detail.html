@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} — Roboport{% endblock %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', path='css/overviews-mobile.css') }}?v={{ static_v }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/server-tools-mobile.css') }}?v={{ static_v }}">
+{% endblock %}
+
+{% set rt_state = rt_status.state.value if rt_status else 'unknown' %}
+{% set is_running = rt_state == 'running' %}
+{% set is_starting = rt_state == 'starting' %}
+{% set tabs = [
+  ('console', t('server_detail.console'),    '>_'),
+  ('docker',  t('server_detail.docker_logs'), '⎘'),
+  ('files',   t('server_detail.files'),       '▤'),
+  ('mods',    t('server_detail.mods'),        '⛁'),
+  ('modconfig',t('server_detail.mod_settings'),'⚒'),
+  ('saves',   t('server_detail.saves'),       '💾'),
+  ('players', t('server_detail.players'),      '☻'),
+  ('metrics', t('server_detail.metrics'),  '📈'),
+  ('schedule',t('server_detail.schedule'),  '⏱'),
+  ('config',  t('server_detail.config'),      '⚙'),
+] %}
+
+{% block content %}
+<h1 class="page-title server-title">
+  <span class="server-title-full">{{ t('server_detail.server_details_label', label=server.name) }}</span>
+  <span class="server-title-name">{{ server.name }}</span>
+</h1>
+<div class="server-uuid muted small">UUID: <span class="confidential">{{ server.uuid }}</span></div>
+
+{% if page_msg %}<div class="alert alert-ok">{{ page_msg }}</div>{% endif %}
+{% if page_err %}<div class="alert alert-err">{{ page_err }}</div>{% endif %}
+
+{% if rt_error %}
+<div class="card alert-card">
+  <div class="card-body">
+    <strong>{{ t('server_detail.the_runtime_is_unavailable') }}</strong>
+    <pre class="alert-pre">{{ rt_error }}</pre>
+    <div class="muted small">{{ t('server_detail.on_windows_start_docker_desktop_and_refresh_this') }}</div>
+  </div>
+</div>
+{% endif %}
+
+<section class="card meta-card server-summary-card">
+  {% include "_partials/server_meta.html" %}
+</section>
+
+<section class="card server-actions-card">
+  <div class="card-body action-row server-primary-actions">
+    <form method="post" action="/servers/{{ server.uuid }}/start" style="display:inline"
+          data-loading="{{ t('server_detail.starting_the_container') }}"
+          data-loading-hint="{{ t('server_detail.if_the_factorio_image_is_missing_pulling_it') }}">
+      <button type="submit" class="btn btn-primary"
+        {% if is_running or rt_error %}disabled{% endif %}>{{ t('server_detail.start') }}</button>
+    </form>
+    <form method="post" action="/servers/{{ server.uuid }}/restart" style="display:inline"
+          data-loading="{{ t('server_detail.restarting_the_container') }}">
+      <button type="submit" class="btn"
+        {% if not is_running or rt_error %}disabled{% endif %}>{{ t('server_detail.restart') }}</button>
+    </form>
+    <form method="post" action="/servers/{{ server.uuid }}/stop" style="display:inline"
+          data-loading="{{ t('server_detail.stopping_the_server') }}"
+          data-loading-hint="{{ t('server_detail.factorio_saves_the_world_before_exiting_this_takes') }}">
+      <button type="submit" class="btn btn-danger"
+        {% if not is_running or rt_error %}disabled{% endif %}>{{ t('server_detail.stop') }}</button>
+    </form>
+    <details class="server-secondary-actions" open>
+      <summary>{{ t('common.actions') }}</summary>
+      <div class="action-row server-secondary-actions-list">
+    <form method="post" action="/servers/{{ server.uuid }}/recreate" style="display:inline"
+          data-loading="{{ t('server_detail.recreating_the_container') }}"
+          data-loading-hint="{{ t('server_detail.replacing_the_old_container_with_a_new_one') }}"
+          data-confirm="{{ t('server_detail.the_container_will_be_replaced_using_the_current') }}">
+      <button type="submit" class="btn"
+        {% if rt_error %}disabled{% endif %}
+        title="{{ t('server_detail.recreate_the_container_after_changing_the_port_version') }}">{{ t('server_detail.recreate') }}</button>
+    </form>
+    <form id="clone-form" method="post" action="/servers/{{ server.uuid }}/clone"
+          style="display:inline; margin-left:auto" data-persist
+          data-loading="{{ t('server_detail.cloning_the_server') }}"
+          data-loading-hint="{{ t('server_detail.copying_the_entire_folder_including_mods_saves_and') }}">
+      <input type="hidden" name="new_name" value="">
+      <input type="hidden" name="new_port" value="">
+      <button type="submit" class="btn"
+              {% if is_running %}disabled title="{{ t('server_detail.stop_the_server_before_cloning_it') }}"
+              {% else %}title="{{ t('server_detail.copy_the_server_including_mods_saves_and_configuration') }}"{% endif %}>
+        {{ t('server_detail.clone') }}
+      </button>
+    </form>
+    <form id="delete-form" method="post" action="/servers/{{ server.uuid }}/delete"
+          style="display:inline" data-persist>
+      <input type="hidden" name="confirm_name" value="">
+      <button type="submit" class="btn btn-danger"
+              title="{{ t('server_detail.permanently_delete_the_server_including_its_container_files') }}">{{ t('server_detail.delete') }}</button>
+    </form>
+      </div>
+    </details>
+  </div>
+</section>
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const form = document.getElementById('delete-form');
+  if (!form) return;
+  const expected = {{ server.name | tojson }};
+  const uuid = {{ server.uuid | tojson }};
+  form.addEventListener('submit', function (e) {
+    // Если confirm_name уже валиден — это restore из sessionStorage после
+    // step-up'а. Юзер уже подтверждал имя в прошлый submit, повторный
+    // prompt только мешает. Пропускаем — форма уйдёт сама.
+    if (form.confirm_name.value === expected) return;
+    const got = prompt(window.rpT('server.delete_prompt', {uuid}));
+    if (got === null) { e.preventDefault(); return; }
+    if (got !== expected) {
+      alert(window.rpT('server.delete_name_mismatch', {name: expected}));
+      e.preventDefault();
+      return;
+    }
+    form.confirm_name.value = got;
+  });
+})();
+
+(function () {
+  const form = document.getElementById('clone-form');
+  if (!form) return;
+  const srcName = {{ server.name | tojson }};
+  const srcPort = {{ server.port | tojson }};
+  form.addEventListener('submit', function (e) {
+    // Restore из sessionStorage после step-up'а: имя+порт уже заполнены,
+    // юзер их вводил в прошлый submit. Сразу сабмитим без двойного prompt'а.
+    const restoredName = (form.new_name.value || '').trim();
+    const restoredPortRaw = (form.new_port.value || '').trim();
+    const restoredPort = parseInt(restoredPortRaw, 10);
+    if (restoredName && restoredPort >= 1024 && restoredPort <= 65535) return;
+    const newName = prompt(
+      window.rpT('server.clone_name_prompt', {name: srcName}),
+      srcName + '-copy'
+    );
+    if (newName === null || !newName.trim()) { e.preventDefault(); return; }
+    const newPort = prompt(
+      window.rpT('server.clone_port_prompt', {port: srcPort}),
+      String(srcPort + 1)
+    );
+    if (newPort === null) { e.preventDefault(); return; }
+    const portNum = parseInt(newPort, 10);
+    if (!portNum || portNum < 1024 || portNum > 65535) {
+      alert(window.rpT('server_detail.invalid_port_cloning_cancelled'));
+      e.preventDefault();
+      return;
+    }
+    form.new_name.value = newName.trim();
+    form.new_port.value = String(portNum);
+  });
+})();
+</script>
+
+{% if visibility_status %}
+{% set vs = visibility_status %}
+<section class="card mobile-visibility-card" style="margin-bottom:14px">
+  <details class="mobile-server-visibility" open>
+  <summary class="card-head">
+    <span class="card-head-title">{{ t('server_detail.public_visibility') }}</span>
+    {% if vs.external_ip and vs.external_conns %}
+      <span class="status status-online">{{ t('server_detail.online_and_reachable') }}</span>
+    {% elif vs.external_ip and not vs.external_conns %}
+      <span class="status" style="background:rgba(255,140,26,.15); color:var(--orange,#ff8c1a)">{{ t('server_detail.public_ip_detected_no_incoming_connections_yet') }}</span>
+    {% elif vs.stun_failed %}
+      <span class="status status-error">{{ t('server_detail.stun_failed_outbound_traffic_is_blocked') }}</span>
+    {% else %}
+      <span class="status status-error">{{ t('server_detail.could_not_determine') }}</span>
+    {% endif %}
+  </summary>
+  <div class="card-body">
+    <div class="meta-row">
+      <span class="meta-label">{{ t('server_detail.public_ip_from_stun') }}</span>
+      {% if vs.external_ip %}<code class="mono confidential">{{ vs.external_ip }}:{{ server.port }}</code>
+      {% else %}<span class="muted small">{{ t('server_detail.unavailable_factorio_could_not_reach_the_pingpong_servers') }}</span>{% endif %}
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">{{ t('server_detail.incoming_connections') }}</span>
+      {% if vs.external_conns %}{{ t('server_detail.external_conns_attempts_from_outside_the_lan_in', external_conns=(vs.external_conns)) }}
+      {% else %}{{ t('server_detail.none_no_players_tried_to_connect_or_the', port=(server.port)) }}{% endif %}
+    </div>
+    {% if not vs.external_conns and vs.external_ip %}
+    <div class="alert alert-err" style="margin-top:10px">
+      {{ t('servers.public_network_forwarding_hint', port=server.port) }}
+    </div>
+    {% endif %}
+    {% if vs.stun_failed %}
+    <div class="alert alert-err" style="margin-top:10px">
+      <b>{{ t('server_detail.stun_failed') }}</b> {{ t('server_detail.the_server_couldnt_determine_its_public_ip_check') }}
+    </div>
+    {% endif %}
+    {% if vs.refusals %}
+    <details style="margin-top:10px">
+      <summary class="muted small" style="cursor:pointer">{{ t('server_detail.recent_connection_attempts_from_outside_the_lan_refusals', refusals=(vs.refusals|length)) }}</summary>
+      <table class="data-table" style="margin-top:8px">
+        <thead><tr><th>IP</th><th>{{ t('server_detail.name') }}</th><th>{{ t('server_detail.reason') }}</th></tr></thead>
+        <tbody>
+          {% for r in vs.refusals %}
+          <tr>
+            <td class="mono confidential">{{ r.ip }}</td>
+            <td>{{ r.username }}</td>
+            <td>
+              {% if r.reason == 'PasswordMismatch' %}
+                <span class="status status-error">{{ t('server_detail.wrong_password') }}</span>
+              {% elif r.reason == 'UserBanned' %}
+                <span class="status status-error">{{ t('server_detail.banned') }}</span>
+              {% elif r.reason == 'PasswordMissing' %}
+                <span class="status status-offline">{{ t('server_detail.no_password_sent') }}</span>
+              {% elif r.reason == 'UserVerificationMissing' %}
+                <span class="status status-offline">{{ t('server_detail.factorio_com_verification') }}</span>
+              {% elif r.reason == 'ServerFull' %}
+                <span class="status status-offline">{{ t('server_detail.server_full') }}</span>
+              {% else %}<code class="mono">{{ r.reason }}</code>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+  </div>
+  </details>
+</section>
+{% endif %}
+
+<details class="mobile-server-sections">
+  <summary>
+    {% for key, label, icon in tabs %}{% if tab == key %}<span class="tab-icon" aria-hidden="true">{{ icon }}</span> {{ label }}{% endif %}{% endfor %}
+  </summary>
+  <nav aria-label="{{ t('server_detail.server_details_label', label=server.name) }}">
+    {% for key, label, icon in tabs %}
+    <a class="{% if tab == key %}active{% endif %}" href="/servers/{{ server.uuid }}/{{ key }}" {% if tab == key %}aria-current="page"{% endif %}>
+      <span class="tab-icon" aria-hidden="true">{{ icon }}</span> {{ label }}
+    </a>
+    {% endfor %}
+  </nav>
+</details>
+
+<nav class="tabs server-desktop-tabs">
+  {% for key, label, icon in tabs %}
+  <a class="tab {% if tab == key %}active{% endif %}"
+     href="/servers/{{ server.uuid }}/{{ key }}">
+    <span class="tab-icon">{{ icon }}</span> {{ label }}
+  </a>
+  {% endfor %}
+</nav>
+
+<section class="card tab-card">
+  <div class="card-body">
+    {% include "server_tabs/" ~ tab ~ ".html" %}
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Live-обновление meta-card каждые 5с: статус, время запуска, число
+  // игроков, exit-code. Кнопки действий (▶/↻/■) не пере-рендерим — на
+  // них висят inline-обработчики (clone/delete с prompt'ами), которые
+  // потерялись бы при swap'е. Их disabled-state читаем по data-rt-state.
+  const UUID = {{ server.uuid | tojson }};
+  const narrow = matchMedia('(max-width: 900px)');
+  const panels = document.querySelectorAll('.server-meta-details, .server-secondary-actions, .mobile-server-visibility, .server-log-filters');
+  const expandedOnPhone = new Set();
+  function sizePanels() {
+    for (const panel of panels) panel.open = !narrow.matches || expandedOnPhone.has(panel);
+  }
+  sizePanels();
+  narrow.addEventListener('change', () => {
+    if (!narrow.matches) {
+      for (const panel of panels) {
+        if (panel.open) expandedOnPhone.add(panel);
+        else expandedOnPhone.delete(panel);
+      }
+    }
+    sizePanels();
+  });
+  const URL = `/servers/${UUID}/meta-fragment`;
+  const INTERVAL_MS = 5000;
+  let inflight = false;
+
+  async function tick() {
+    if (inflight || document.hidden) return;
+    inflight = true;
+    try {
+      const r = await fetch(URL, { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) return;
+      const html = await r.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const fresh = doc.getElementById('srv-meta-grid');
+      const cur = document.getElementById('srv-meta-grid');
+      if (fresh && cur) {
+        // Keep the disclosure and its focused summary when a poll refreshes the values.
+        for (const selector of ['summary', '.meta-grid']) {
+          cur.querySelector(selector).replaceChildren(...fresh.querySelector(selector).childNodes);
+        }
+        // Синхронизируем disabled у action-buttons на основе нового state.
+        // running → ▶ disabled, ↻ active, ■ active. иначе наоборот.
+        const state = fresh.dataset.rtState || 'unknown';
+        cur.dataset.rtState = state;
+        const running = state === 'running';
+        const starting = state === 'starting';
+        // Селекторы повторяют action-row выше: формы /start, /restart, /stop.
+        const setBtn = (sel, disabled) => {
+          const b = document.querySelector(sel);
+          if (b) b.disabled = !!disabled;
+        };
+        setBtn(`form[action$="/start"] button`, running || starting);
+        setBtn(`form[action$="/restart"] button`, !running);
+        setBtn(`form[action$="/stop"] button`, !running);
+      }
+    } catch { /* проглатываем — попробуем на следующем тике */ }
+    finally { inflight = false; }
+  }
+  setInterval(tick, INTERVAL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) tick();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  python:
+    name: Python lint + import
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install runtime + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: py_compile across tracked .py files
+        run: |
+          set -e
+          mapfile -t files < <(git ls-files '*.py')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no python files"; exit 0
+          fi
+          python -m py_compile "${files[@]}"
+
+      - name: Import sanity check
+        run: |
+          python -c "from app.main import app; print('app loaded:', type(app).__name__)"
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests/ -v
+
+  shell:
+    name: Shell syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash -n on deploy/*.sh and .githooks/*
+        run: |
+          set -e
+          shopt -s nullglob
+          for f in deploy/*.sh .githooks/*; do
+            [ -f "$f" ] || continue
+            echo "checking $f"
+            bash -n "$f"
+          done

@@ -1,0 +1,165 @@
+{% macro password_input(name, id, label, purpose='current-password') %}
+  <div class="field">
+    <label class="field-label" for="{{ id }}">{{ label }}</label>
+    <span class="pw-input">
+      <input type="password" class="input" name="{{ name }}" id="{{ id }}"
+             minlength="8" maxlength="256" autocomplete="{{ purpose }}" required>
+      <button type="button" class="pw-toggle" aria-label="{{ t('settings.security.show_or_hide_the_password') }}">👁</button>
+    </span>
+  </div>
+{% endmacro %}
+
+{% if security and current_user %}
+  <section class="settings-section">
+    <h2>{{ t('settings.security.account_sign_in') }}</h2>
+    <details class="settings-disclosure" id="account-name">
+      <summary><span>{{ t('account.change_username') }}</span><span class="setting-value confidential">{{ current_user.username }}</span></summary>
+      <div class="settings-body">
+        <form id="account-username-form" method="post" action="/settings/account/username" class="form" data-persist{% if msg %} data-saved{% endif %}>
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="field">
+            <label class="field-label" for="new-username">{{ t('account.new_username') }}</label>
+            <input class="input" type="text" id="new-username" name="new_username" value="{{ current_user.username }}"
+                   minlength="3" maxlength="32" required autocomplete="username" autocapitalize="none" spellcheck="false"
+                   aria-describedby="new-username-hint">
+            <span class="field-hint" id="new-username-hint">{{ t('login.username_hint') }}</span>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">{{ t('settings.general.save') }}</button></div>
+        </form>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary>
+        <span>{{ t('settings.security.two_factor_authentication') }}</span>
+        <span class="setting-value">{{ t('settings.security.enabled') if security.totp_enabled else t('settings.security.disabled') }}</span>
+      </summary>
+      <div class="settings-body">
+        {% if security.totp_enabled %}
+          <p>{{ t('settings.security.backup_codes_remaining_backup_codes_left', backup_codes_left=(security.backup_codes_left)) }}{% if security.backup_codes_left <= 3 %} {{ t('settings.security.generate_a_new_set_soon') }}{% endif %}</p>
+          <form method="post" action="/settings/2fa/regenerate-codes" class="form"
+                data-confirm="{{ t('settings.security.generate_new_backup_codes_your_old_codes_will') }}">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            {{ password_input('password', 'codes-password', t('settings.security.password_to_generate_new_codes')) }}
+            <div class="form-actions"><button class="btn">{{ t('settings.security.generate_new_codes') }}</button></div>
+          </form>
+          <form method="post" action="/settings/2fa/disable" class="form"
+                data-confirm="{{ t('settings.security.turn_off_two_factor_authentication_youll_be_able') }}">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            {{ password_input('password', 'disable-2fa-password', t('settings.security.password_to_turn_off_two_factor_authentication')) }}
+            <div class="form-actions"><button class="btn btn-danger">{{ t('settings.security.turn_off_two_factor_authentication') }}</button></div>
+          </form>
+        {% else %}
+          <p>{{ t('settings.security.sign_in_will_require_a_code_from_your') }}</p>
+          <a href="/settings/2fa/setup" class="btn btn-primary">{{ t('settings.security.set_up_two_factor_authentication') }}</a>
+        {% endif %}
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.security.change_password') }}</span></summary>
+      <div class="settings-body">
+        <form method="post" action="/change-password" class="form">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          {{ password_input('current_password', 'current-password', t('settings.security.current_password')) }}
+          {{ password_input('new_password', 'new-password', t('recovery.new_password'), 'new-password') }}
+          {{ password_input('new_password2', 'repeat-password', t('settings.security.re_enter_your_new_password'), 'new-password') }}
+          <p class="field-hint">{{ t('settings.security.changing_your_password_signs_you_out_on_other') }}</p>
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.security.change_password') }}</button></div>
+        </form>
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.security.active_sessions') }}</span><span class="setting-value">{{ security.sessions|length }}</span></summary>
+      <div class="settings-body">
+        {% if security.sessions %}
+          <div class="settings-table">
+            <table class="data-table">
+              <thead><tr><th>{{ t('settings.security.session') }}</th><th>IP</th><th>{{ t('settings.security.device') }}</th><th>{{ t('settings.integrations.created') }}</th><th>{{ t('settings.security.activity') }}</th><th>{{ t('settings.integrations.expires') }}</th></tr></thead>
+              <tbody>
+                {% for session in security.sessions %}
+                  <tr>
+                    <td>{{ t('settings.security.current') if session.id == security.current_session_id else t('settings.security.other') }}</td>
+                    <td>{{ session.ip or '—' }}</td>
+                    <td>{{ session.user_agent or '—' }}</td>
+                    <td>{{ session.created_at | unixtime }}</td>
+                    <td>{{ session.last_seen_at | unixtime }}</td>
+                    <td>{{ session.expires_at | unixtime }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if security.sessions|length > 1 %}
+            <form method="post" action="/sessions/revoke-others" class="form"
+                  data-confirm="{{ t('settings.security.sign_out_on_all_other_devices') }}">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <div class="form-actions"><button class="btn btn-danger">{{ t('settings.security.sign_out_on_other_devices') }}</button></div>
+            </form>
+          {% endif %}
+        {% else %}
+          <p>{{ t('settings.security.no_active_sessions') }}</p>
+        {% endif %}
+      </div>
+    </details>
+  </section>
+
+  <div class="settings-section">
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.security.blocked_ip_addresses') }}</span><span class="setting-value">{{ security.bans|length }}</span></summary>
+      <div class="settings-body">
+        {% if security.bans %}
+          <div class="settings-table">
+            <table class="data-table">
+              <thead><tr><th>IP</th><th>{{ t('settings.security.blocked') }}</th><th>{{ t('settings.security.until') }}</th><th>{{ t('schedule.type') }}</th><th>{{ t('server_detail.reason') }}</th><th></th></tr></thead>
+              <tbody>
+                {% for ban in security.bans %}
+                  <tr>
+                    <td>{{ ban.ip }}</td>
+                    <td>{{ ban.banned_at | unixtime }}</td>
+                    <td>{% if ban.banned_until %}{{ ban.banned_until | unixtime }}{% else %}{{ t('settings.integrations.never_expires') }}{% endif %}</td>
+                    <td>{{ t('settings.editor_auto') if ban.auto else t('settings.security.manual') }}</td>
+                    <td>{{ ban.reason or '—' }}</td>
+                    <td>
+                      <form method="post" action="/settings/unban" data-confirm="{{ t('settings.security.unblock_ip', ip=(ban.ip)) }}">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="ip" value="{{ ban.ip }}">
+                        <button class="btn btn-sm">{{ t('settings.security.unblock_label') }}</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>{{ t('settings.security.no_blocked_ip_addresses') }}</p>
+        {% endif %}
+      </div>
+    </details>
+    <details class="settings-disclosure">
+      <summary><span>{{ t('settings.security.sign_in_history') }}</span></summary>
+      <div class="settings-body">
+        {% for title, attempts in [(t('settings.security.successful_sign_ins_in_the_last_7_days'), security.successful_logins),
+                                    (t('settings.security.failed_attempts_in_the_last_24_hours'), security.failed_attempts)] %}
+          <h3>{{ title }}</h3>
+          {% if attempts %}
+            <div class="settings-table">
+              <table class="data-table">
+                <thead><tr><th>{{ t('audit_table.when') }}</th><th>IP</th><th>{{ t('settings.security.account') }}</th></tr></thead>
+                <tbody>
+                  {% for attempt in attempts %}
+                    <tr>
+                      <td>{{ attempt.ts | unixtime }}</td>
+                      <td>{{ attempt.ip }}</td><td>{{ attempt.username or '—' }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="field-hint">{{ t('settings.security.no_entries') }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </details>
+  </div>
+{% endif %}

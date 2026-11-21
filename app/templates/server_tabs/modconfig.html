@@ -1,0 +1,444 @@
+{# Настройки модов: редактор mod-settings.dat по модам.
+   Группировка: scope (startup / runtime-global / runtime-per-user) → мод → settings.
+   Если мод отдаёт спеку (allowed_values, min/max, default_value) — рендерим её
+   в виджет (select / number-with-bounds) и валидируем на сервере. #}
+
+<div class="modcfg-wrap" id="modcfg-tab" data-uuid="{{ server.uuid }}">
+
+  {% if modcfg_err %}
+  <div class="alert alert-err">{{ modcfg_err }}</div>
+  {% endif %}
+
+  <div class="muted small" style="margin-bottom:12px">
+    {{ t('modconfig.reset_and_restart_hint', file='servers/' ~ server.uuid ~ '/mods/mod-settings.dat', script='settings.lua') }}
+  </div>
+
+  {% if modcfg_view %}
+  <div class="modcfg-search-bar" style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+    <input type="search" class="input input-sm" id="modcfg-search"
+           placeholder="{{ t('modconfig.search_by_setting_name_or_mod') }}"
+           style="flex:1;max-width:420px" autocomplete="off">
+    <span class="muted small" id="modcfg-search-stats"></span>
+  </div>
+  {% endif %}
+
+  {# Sticky-бар bulk-сохранения. Появляется когда в любой строке есть dirty.
+     position:sticky к низу вьюпорта, чтобы не нужно было скроллить к концу
+     длинного списка. #}
+  <div id="modcfg-bulkbar" class="modcfg-bulkbar" hidden
+       style="position:sticky;bottom:0;z-index:5;
+              background:var(--bg-1, #1c1c1c);border-top:1px solid var(--border, #333);
+              padding:10px 14px;margin:14px -14px 0;display:flex;gap:10px;
+              align-items:center;justify-content:space-between">
+    <span class="muted small">
+      {{ t('server_tabs.modconfig.unsaved_changes') }} <b id="modcfg-dirty-count">0</b>
+    </span>
+    <span style="display:flex;gap:8px">
+      <button type="button" class="btn btn-sm" id="modcfg-bulk-revert">{{ t('modconfig.revert_all') }}</button>
+      <button type="button" class="btn btn-sm btn-primary" id="modcfg-bulk-save">{{ t('modconfig.save_all') }}</button>
+    </span>
+  </div>
+
+  {% if modcfg_view %}
+    {% for scope, label in [
+       ('startup',          t('modconfig.scope_startup')),
+       ('runtime-global',   t('modconfig.scope_runtime_global')),
+       ('runtime-per-user', t('modconfig.scope_runtime_per_user'))
+    ] %}
+      <section class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="card-head-title">{{ label }} ({{ modcfg_view[scope]|map(attribute='count')|sum }})</span>
+        </div>
+        <div class="card-body modcfg-scope">
+          {% if not modcfg_view[scope] %}
+            <div class="empty-state">{{ t('modconfig.no_settings_in_this_group') }}</div>
+          {% else %}
+            {% for grp in modcfg_view[scope] %}
+              <details class="modcfg-group">
+                <summary>
+                  <span class="modcfg-mod mono">{{ grp.mod }}</span>
+                  <span class="muted small">· {{ grp.count }}</span>
+                </summary>
+                <table class="data-table modcfg-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('modconfig.name') }}</th><th class="num">{{ t('modconfig.type') }}</th><th>{{ t('modconfig.value') }}</th><th class="actions-col"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for it in grp['items'] %}
+                    <tr data-scope="{{ scope }}" data-name="{{ it.name }}" data-kind="{{ it.kind }}">
+                      <td>
+                        <code class="mono">{{ it.name }}</code>
+                        {% if it.default is not none %}
+                          <div class="muted small">{{ t('modconfig.default_value', value=it.default) }}
+                            {% if it.min is not none or it.max is not none %}
+                              {{ t('server_tabs.modconfig.range_value_value2', value=(it.min if it.min is not none else '−∞'), value2=(it.max if it.max is not none else '+∞')) }}
+                            {% endif %}
+                          </div>
+                        {% endif %}
+                      </td>
+                      <td class="num muted small">{{ it.kind }}</td>
+                      <td class="modcfg-val">
+                        {% if it.kind == 'bool' %}
+                          <label class="check-field">
+                            <input type="checkbox" {% if it.value %}checked{% endif %}>
+                            <span class="muted small">{{ t('modconfig.enabled_value') if it.value else t('modconfig.disabled_value') }}</span>
+                          </label>
+                        {% elif it.kind == 'string' and it.allowed %}
+                          <select class="input input-sm modcfg-input">
+                            {% for opt in it.allowed %}
+                              <option value="{{ opt }}" {% if opt == it.value %}selected{% endif %}>{{ opt }}</option>
+                            {% endfor %}
+                          </select>
+                        {% elif it.kind in ('double', 'i64', 'u64') %}
+                          <input type="number" class="input input-sm modcfg-input"
+                                 value="{{ it.value }}"
+                                 {% if it.kind == 'u64' or (it.min is not none and it.min >= 0) %}min="{{ it.min if it.min is not none else 0 }}"{% elif it.min is not none %}min="{{ it.min }}"{% endif %}
+                                 {% if it.max is not none %}max="{{ it.max }}"{% endif %}
+                                 {% if it.kind == 'double' %}step="any"{% else %}step="1"{% endif %}>
+                        {% elif it.kind == 'string' %}
+                          <input type="text" class="input input-sm modcfg-input" value="{{ it.value }}">
+                        {% elif it.kind == 'color' %}
+                          {# Цветовой словарь {r,g,b,a}. Hidden-input хранит
+                             каноничную строку '#rrggbb:alpha' (для readValue);
+                             color и slider синхронизируются JS'ом. #}
+                          <span class="modcfg-color-wrap" style="display:inline-flex;gap:6px;align-items:center">
+                            <input type="color" class="modcfg-color" value="{{ it.value.hex }}"
+                                   style="width:38px;height:24px;padding:0;border:1px solid var(--border, #444);background:transparent">
+                            <input type="range" class="modcfg-alpha" min="0" max="1" step="0.01"
+                                   value="{{ '%.2f'|format(it.value.alpha) }}" title="{{ t('modconfig.opacity') }}"
+                                   style="width:80px">
+                            <span class="modcfg-alpha-val muted small" style="font-size:11px;width:30px">{{ '%.0f'|format(it.value.alpha * 100) }}%</span>
+                            <input type="hidden" class="modcfg-input"
+                                   value="{{ it.value.hex }}:{{ '%.2f'|format(it.value.alpha) }}">
+                          </span>
+                        {% else %}
+                          <span class="muted small">{{ t('server_tabs.modconfig.kind_value_read_only', kind=(it.kind), value=(it.value)) }}</span>
+                        {% endif %}
+                      </td>
+                      <td class="actions">
+                        {% if it.kind in ('bool','double','i64','u64','string') %}
+                          <button type="button" class="btn btn-sm modcfg-save" disabled>{{ t('modconfig.save') }}</button>
+                        {% endif %}
+                        <button type="button" class="btn btn-sm modcfg-revert" title="{{ t('modconfig.restore_the_mods_default_value') }}">{{ t('modconfig.restore_default_button') }}</button>
+                        <span class="modcfg-status muted small"></span>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </details>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const root = document.getElementById('modcfg-tab');
+  if (!root) return;
+  const uuid = root.dataset.uuid;
+
+  // ---------- Поиск по настройкам ----------
+  // Фильтрует строки по data-name + по имени мода (.modcfg-mod в summary).
+  // Скрывает группы и scope-секции у которых после фильтра не осталось матчей.
+  // Открывает <details> автоматически чтобы юзер сразу видел совпадения.
+  const searchInp = document.getElementById('modcfg-search');
+  const searchStats = document.getElementById('modcfg-search-stats');
+  if (searchInp) {
+    const groups = root.querySelectorAll('.modcfg-group');
+    const scopeCards = root.querySelectorAll('.card');
+    const allRows = root.querySelectorAll('tr[data-scope]');
+    const initialOpen = new Map();
+    groups.forEach(g => initialOpen.set(g, g.open));
+
+    function applyFilter() {
+      const q = (searchInp.value || '').trim().toLowerCase();
+      let totalShown = 0;
+      groups.forEach(g => {
+        const modName = (g.querySelector('.modcfg-mod')?.textContent || '').toLowerCase();
+        const rows = g.querySelectorAll('tr[data-scope]');
+        let groupShown = 0;
+        rows.forEach(r => {
+          if (!q) {
+            r.style.display = '';
+            groupShown++;
+            return;
+          }
+          const name = (r.dataset.name || '').toLowerCase();
+          const match = name.includes(q) || modName.includes(q);
+          r.style.display = match ? '' : 'none';
+          if (match) groupShown++;
+        });
+        g.style.display = groupShown === 0 ? 'none' : '';
+        if (q && groupShown > 0) {
+          g.open = true;
+        } else if (!q) {
+          g.open = initialOpen.get(g) || false;
+        }
+        totalShown += groupShown;
+      });
+      // Если в scope-card нет видимых групп — спрячем всю секцию
+      scopeCards.forEach(c => {
+        const visible = c.querySelectorAll('.modcfg-group:not([style*="none"])').length;
+        c.style.display = visible === 0 && q ? 'none' : '';
+      });
+      if (searchStats) {
+        searchStats.textContent = q
+      ? window.rpT('modconfig.found_count', {shown: totalShown, total: allRows.length})
+          : '';
+      }
+    }
+    searchInp.addEventListener('input', applyFilter);
+  }
+
+  function showStatus(row, text, kind) {
+    const el = row.querySelector('.modcfg-status');
+    el.textContent = text;
+    el.classList.remove('status-ok', 'status-err');
+    if (kind) el.classList.add('status-' + kind);
+    if (text) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 3000);
+  }
+
+  function readValue(row) {
+    const kind = row.dataset.kind;
+    if (kind === 'bool') {
+      return row.querySelector('input[type=checkbox]').checked;
+    }
+    const inp = row.querySelector('.modcfg-input');
+    if (!inp) return null;
+    return inp.value;
+  }
+
+  function applyValue(row, value) {
+    const kind = row.dataset.kind;
+    if (kind === 'bool') {
+      const cb = row.querySelector('input[type=checkbox]');
+      cb.checked = !!value;
+      const lbl = row.querySelector('.modcfg-val .check-field span');
+      if (lbl) lbl.textContent = cb.checked ? window.rpT('modconfig.enabled_value') : window.rpT('modconfig.disabled_value');
+    } else if (kind === 'color') {
+      // value = '#rrggbb:alpha' — раскидываем по color, slider, label, hidden.
+      const inp = row.querySelector('input.modcfg-input');
+      const color = row.querySelector('.modcfg-color');
+      const alpha = row.querySelector('.modcfg-alpha');
+      const aLabel = row.querySelector('.modcfg-alpha-val');
+      if (inp) inp.value = value;
+      const m = String(value || '').match(/^(#[0-9a-fA-F]{6})(?::([0-9.]+))?$/);
+      if (m) {
+        if (color) color.value = m[1];
+        const a = m[2] !== undefined ? parseFloat(m[2]) : 1.0;
+        if (alpha) alpha.value = a.toFixed(2);
+        if (aLabel) aLabel.textContent = Math.round(a * 100) + '%';
+      }
+    } else {
+      const inp = row.querySelector('.modcfg-input');
+      if (inp) inp.value = value;
+    }
+  }
+
+  // ---------- Bulk save / dirty-tracking ----------
+  // Сохраняем initial-значения каждой строки в data-original при первом
+  // рендере, чтобы знать «вернулся ли юзер к исходному». Если да — снимаем
+  // dirty-метку и убираем строку из bulk-списка.
+  const bulkbar = document.getElementById('modcfg-bulkbar');
+  const dirtyCountEl = document.getElementById('modcfg-dirty-count');
+  const bulkSaveBtn = document.getElementById('modcfg-bulk-save');
+  const bulkRevertBtn = document.getElementById('modcfg-bulk-revert');
+
+  function rowOriginal(row) {
+    if (row.dataset.original !== undefined) return row.dataset.original;
+    // Первое чтение — снапшотим initial. Для bool храним '0'/'1', для прочих — string.
+    let v;
+    if (row.dataset.kind === 'bool') {
+      v = row.querySelector('input[type=checkbox]').checked ? '1' : '0';
+    } else {
+      const inp = row.querySelector('.modcfg-input');
+      v = inp ? inp.value : '';
+    }
+    row.dataset.original = v;
+    return v;
+  }
+  function rowCurrent(row) {
+    if (row.dataset.kind === 'bool') {
+      return row.querySelector('input[type=checkbox]').checked ? '1' : '0';
+    }
+    const inp = row.querySelector('.modcfg-input');
+    return inp ? inp.value : '';
+  }
+  function isDirty(row) {
+    return rowOriginal(row) !== rowCurrent(row);
+  }
+  function refreshBulk() {
+    const dirtyRows = root.querySelectorAll('tr[data-scope].is-dirty');
+    const n = dirtyRows.length;
+    if (dirtyCountEl) dirtyCountEl.textContent = n;
+    if (bulkbar) bulkbar.hidden = n === 0;
+  }
+  function setRowDirty(row) {
+    const dirty = isDirty(row);
+    row.classList.toggle('is-dirty', dirty);
+    // Подсветка dirty-строк — оранжевая left-border, чтобы не смешивалось
+    // с status-ok зелёной от per-row save.
+    row.style.boxShadow = dirty ? 'inset 3px 0 0 #ff8c1a' : '';
+    const btn = row.querySelector('.modcfg-save');
+    if (btn) btn.disabled = !dirty;
+    refreshBulk();
+  }
+  // ---------- Color picker: синхронизация с hidden-input ----------
+  // Формат hidden value: '#rrggbb:alpha' (alpha в 0..1, 2 знака).
+  // Меняется и color, и slider — оба пишут в hidden и триггерят 'input' для
+  // dirty-tracker (общий обработчик root.input выше уже его поймает).
+  function syncColorRow(row) {
+    const color = row.querySelector('.modcfg-color');
+    const alpha = row.querySelector('.modcfg-alpha');
+    const hidden = row.querySelector('input.modcfg-input');
+    const aLabel = row.querySelector('.modcfg-alpha-val');
+    if (!color || !alpha || !hidden) return;
+    const a = parseFloat(alpha.value);
+    hidden.value = `${color.value}:${a.toFixed(2)}`;
+    if (aLabel) aLabel.textContent = Math.round(a * 100) + '%';
+    // Триггерим input event, чтобы общий dirty-tracker заметил изменение
+    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  root.querySelectorAll('tr[data-kind="color"]').forEach(row => {
+    const color = row.querySelector('.modcfg-color');
+    const alpha = row.querySelector('.modcfg-alpha');
+    if (color) color.addEventListener('input', () => syncColorRow(row));
+    if (alpha) alpha.addEventListener('input', () => syncColorRow(row));
+  });
+
+  // Снапшотим initial для всех строк (один раз при загрузке).
+  root.querySelectorAll('tr[data-scope]').forEach(r => rowOriginal(r));
+
+  root.addEventListener('input', e => {
+    const row = e.target.closest('tr[data-scope]');
+    if (row) setRowDirty(row);
+  });
+  root.addEventListener('change', e => {
+    const row = e.target.closest('tr[data-scope]');
+    if (!row) return;
+    if (row.dataset.kind === 'bool') {
+      const lbl = row.querySelector('.modcfg-val .check-field span');
+      if (lbl) lbl.textContent = e.target.checked ? window.rpT('modconfig.enabled_value') : window.rpT('modconfig.disabled_value');
+    }
+    setRowDirty(row);
+  });
+
+  if (bulkSaveBtn) {
+    bulkSaveBtn.addEventListener('click', async () => {
+      const dirty = Array.from(root.querySelectorAll('tr[data-scope].is-dirty'));
+      if (!dirty.length) return;
+      bulkSaveBtn.disabled = true;
+      bulkRevertBtn.disabled = true;
+      let ok = 0, fail = 0;
+      // Sequential — модфайл readiness и атомарность важнее скорости. У ~20
+      // настроек это всё равно <2с, не так уж медленно.
+      for (const row of dirty) {
+        try {
+          await postJSON(`/servers/${uuid}/modconfig/update`, {
+            scope: row.dataset.scope, name: row.dataset.name,
+            kind: row.dataset.kind, value: readValue(row),
+          });
+          // Сохранили → текущее становится новым original
+          row.dataset.original = rowCurrent(row);
+          showStatus(row, window.rpT('modconfig.saved'), 'ok');
+          row.classList.remove('is-dirty');
+          row.style.boxShadow = '';
+          const btn = row.querySelector('.modcfg-save');
+          if (btn) btn.disabled = true;
+          ok++;
+        } catch (err) {
+          showStatus(row, window.rpT('modconfig.save_failed', {error: err.message}), 'err');
+          fail++;
+        }
+      }
+      bulkSaveBtn.disabled = false;
+      bulkRevertBtn.disabled = false;
+      refreshBulk();
+      if (fail) alert(window.rpT('modconfig.save_result', {saved: ok, failed: fail}));
+    });
+  }
+  if (bulkRevertBtn) {
+    bulkRevertBtn.addEventListener('click', () => {
+      const dirty = Array.from(root.querySelectorAll('tr[data-scope].is-dirty'));
+      if (!dirty.length) return;
+      if (!confirm(window.rpT('modconfig.discard_confirm', {count: dirty.length}))) return;
+      dirty.forEach(row => {
+        const orig = row.dataset.original;
+        if (row.dataset.kind === 'bool') {
+          applyValue(row, orig === '1');
+        } else {
+          applyValue(row, orig);
+        }
+        row.classList.remove('is-dirty');
+        row.style.boxShadow = '';
+        const btn = row.querySelector('.modcfg-save');
+        if (btn) btn.disabled = true;
+      });
+      refreshBulk();
+    });
+  }
+
+  async function postJSON(url, body) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error('HTTP ' + r.status + ': ' + txt);
+    }
+    return r.json();
+  }
+
+  root.addEventListener('click', async e => {
+    const row = e.target.closest('tr[data-scope]');
+    if (!row) return;
+
+    if (e.target.classList.contains('modcfg-save')) {
+      e.target.disabled = true;
+      const body = {
+        scope: row.dataset.scope,
+        name: row.dataset.name,
+        kind: row.dataset.kind,
+        value: readValue(row),
+      };
+      try {
+        await postJSON(`/servers/${uuid}/modconfig/update`, body);
+        showStatus(row, window.rpT('modconfig.saved_message'), 'ok');
+      } catch (err) {
+        showStatus(row, window.rpT('modconfig.save_failed', {error: err.message}), 'err');
+        e.target.disabled = false;
+      }
+    }
+
+    if (e.target.classList.contains('modcfg-revert')) {
+      if (!confirm(window.rpT('modconfig.reset_confirm', {name: row.dataset.name}))) return;
+      try {
+        const res = await postJSON(`/servers/${uuid}/modconfig/revert`, {
+          scope: row.dataset.scope, name: row.dataset.name,
+        });
+        if (res.kind === 'reset') {
+          applyValue(row, res.value);
+          showStatus(row, window.rpT('modconfig.default_restored'), 'ok');
+        } else {
+          // Default неизвестен — удалили запись. Factorio проставит на старте.
+          row.style.opacity = 0.4;
+          showStatus(row, window.rpT('modconfig.removed_the_mods_default_will_apply_after_restart'), 'ok');
+        }
+        const btn = row.querySelector('.modcfg-save');
+        if (btn) btn.disabled = true;
+      } catch (err) {
+        showStatus(row, window.rpT('modconfig.reset_failed', {error: err.message}), 'err');
+      }
+    }
+  });
+})();
+</script>

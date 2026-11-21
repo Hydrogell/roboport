@@ -1,0 +1,107 @@
+{# Сейвы Factorio — это .zip в saves/. Сами по себе атомарны, поэтому отдельного
+   backup-слоя не делаем: операции = save-now (RCON) + копировать/переименовать zip.
+   Загружаемый при старте сейв = saves/default.zip (SAVE_NAME=default в DockerRuntime). #}
+
+<div class="saves-wrap">
+
+  {% if saves_msg %}
+  <div class="alert alert-ok">{{ saves_msg }}</div>
+  {% endif %}
+  {% if saves_err %}
+  <div class="alert alert-err">{{ saves_err }}</div>
+  {% endif %}
+
+  <div class="mods-header">
+    <div class="muted small">
+      {{ t('saves.location', path='servers/' ~ server.uuid ~ '/saves/', filename=saves_loaded_name) }}
+    </div>
+    <div class="muted small">
+      {{ t('saves.atomic_write_hint', extension='.zip', command='/server-save') }}
+    </div>
+  </div>
+
+  <div class="files-toolbar">
+    <form method="post" action="/servers/{{ server.uuid }}/saves/save-now" class="inline-form"
+          data-loading="{{ t('saves.saving_the_world') }}"
+          data-loading-hint="{{ t('saves.rcon_server_save_factorio_writes_the_zip_atomically') }}">
+      <button type="submit" class="btn btn-sm btn-primary"
+        {% if not is_running %}disabled title="{{ t('saves.the_server_is_stopped') }}"{% endif %}>
+        {{ t('server_tabs.saves.save_now') }}
+      </button>
+    </form>
+
+    <form method="post" action="/servers/{{ server.uuid }}/saves/upload"
+          enctype="multipart/form-data" class="inline-form"
+          data-loading="{{ t('saves.uploading_save') }}"
+          data-loading-hint="{{ t('saves.saves_of_50_mb_or_more_may_take') }}">
+      <input type="file" name="file" accept=".zip" class="input input-sm" required>
+      <button type="submit" class="btn btn-sm">{{ t('saves.upload_zip') }}</button>
+    </form>
+  </div>
+
+  {% if not saves_listing %}
+    <div class="empty-state">
+      {{ t('saves.empty_creation_hint', filename=saves_loaded_name, option='GENERATE_NEW_SAVE=true', extension='.zip') }}
+    </div>
+  {% else %}
+  <table class="data-table files-table">
+    <thead>
+      <tr>
+        <th>{{ t('saves.name') }}</th>
+        <th class="num">{{ t('saves.size') }}</th>
+        <th class="num">{{ t('saves.modified') }}</th>
+        <th class="num">{{ t('saves.mods') }}</th>
+        <th class="actions-col">{{ t('saves.actions') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in saves_listing %}
+      <tr>
+        <td>
+          <span class="file-name mono">{{ s.name }}</span>
+          {% if s.name == saves_loaded_name %}
+          <span class="badge" title="{{ t('saves.this_save_is_loaded_when_the_container_starts') }}">{{ t('saves.current') }}</span>
+          {% endif %}
+          {% if s.mods %}
+            <div class="muted small" style="margin-top:4px">
+              {% for m in s.mods[:6] %}<code class="mono">{{ m.name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+              {% if s.mods|length > 6 %}… +{{ s.mods|length - 6 }}{% endif %}
+            </div>
+          {% endif %}
+        </td>
+        <td class="num" data-mobile-label="{{ t('saves.size') }}">{{ s.size_h }}</td>
+        <td class="num muted" data-mobile-label="{{ t('saves.modified') }}">{{ s.mtime }}</td>
+        <td class="num" data-mobile-label="{{ t('saves.mods') }}">{{ s.mods_count or '—' }}</td>
+        <td class="actions">
+          <a class="icon-btn" title="{{ t('saves.download') }}"
+             href="/servers/{{ server.uuid }}/saves/download?name={{ s.name|urlencode }}">⬇</a>
+
+          <form method="post" action="/servers/{{ server.uuid }}/saves/rename" style="display:inline"
+                data-prompt="{{ t('saves.new_save_name_zip_is_added_automatically') }}" data-prompt-field="new" data-prompt-required>
+            <input type="hidden" name="old" value="{{ s.name }}">
+            <input type="hidden" name="new" value="{{ s.name }}">
+            <button type="submit" class="icon-btn" title="{{ t('saves.rename') }}">✎</button>
+          </form>
+
+          {% if s.name != saves_loaded_name %}
+          <form method="post" action="/servers/{{ server.uuid }}/saves/set-current" style="display:inline"
+                data-confirm="{{ t('saves.set_current_confirm', name=s.name, current=saves_loaded_name) }}">
+            <input type="hidden" name="name" value="{{ s.name }}">
+            <button type="submit" class="icon-btn" title="{{ t('saves.use_this_save_at_startup') }}"
+              {% if is_running %}disabled{% endif %}>★</button>
+          </form>
+          {% endif %}
+
+          <form method="post" action="/servers/{{ server.uuid }}/saves/delete" style="display:inline"
+                data-confirm="{{ t('saves.delete_confirm', name=s.name) }}">
+            <input type="hidden" name="name" value="{{ s.name }}">
+            <button type="submit" class="icon-btn danger" title="{{ t('saves.delete') }}">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+</div>

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{# Reloading this receipt consumes the one-time backup codes. #}
+{% block language_picker %}{% endblock %}
+{% block title %}{{ t('totp_codes.2fa_backup_codes_roboport') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('totp_codes.two_factor_backup_codes') }}</h1>
+
+<section class="card" style="max-width:560px">
+  <div class="card-body">
+
+    <div class="alert alert-err" style="margin-bottom:14px">
+      <b>{{ t('totp_codes.save_these_codes_now') }}</b>
+      {{ t('totp_codes.this_is_the_only_time_roboport_shows_these') }}
+    </div>
+
+    <div id="codes-block" class="mono confidential" style="
+         background: var(--bg-2);
+         border: 1px solid var(--border-1);
+         border-radius: 8px;
+         padding: 14px 18px;
+         font-size: 15px;
+         line-height: 1.9;
+         letter-spacing: .08em;
+         user-select: all;">
+      {% for c in codes %}{{ c }}
+{% endfor %}</div>
+
+    <div class="form-actions" style="margin-top:14px; gap:8px">
+      <button type="button" class="btn btn-primary" id="btn-copy">{{ t('totp_codes.copy_all') }}</button>
+      <button type="button" class="btn" id="btn-download">{{ t('totp_codes.download_txt') }}</button>
+      <button type="button" class="btn" id="btn-print">{{ t('totp_codes.print') }}</button>
+    </div>
+
+    <div class="muted small" style="margin-top:18px;
+         padding-top:12px; border-top:1px solid var(--border-1)">
+      <p style="margin:0 0 6px"><b>{{ t('totp_codes.where_to_keep_your_codes') }}</b></p>
+      <ul style="margin:0; padding-left:20px">
+        <li>{{ t('totp_codes.a_password_manager_1password_bitwarden_or_keepass_preferably') }}</li>
+        <li>{{ t('totp_codes.a_printed_copy_in_a_secure_location') }}</li>
+        <li>{{ t('totp_codes.encrypted_text_file_age_gpg_encrypted_volume') }}</li>
+      </ul>
+      <p style="margin:8px 0 0"><b>{{ t('totp_codes.avoid_storing_them') }}</b> {{ t('totp_codes.in_a_plain_text_file_on_the_same') }}</p>
+    </div>
+
+    <div class="form-actions" style="margin-top:18px">
+      <a href="/settings#security" class="btn btn-primary"
+         id="btn-done"
+         data-confirm="{{ t('totp_codes.have_you_saved_your_backup_codes_somewhere_secure') }}">{{ t('totp_codes.ive_saved_my_codes') }}</a>
+    </div>
+
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const block = document.getElementById('codes-block');
+  const codes = block.textContent.trim();
+  const username = {{ username | tojson }};
+  const filename = 'roboport-backup-codes-' + username + '.txt';
+
+  document.getElementById('btn-copy').addEventListener('click', () => {
+    navigator.clipboard.writeText(codes).then(() => {
+      const b = document.getElementById('btn-copy');
+      const orig = b.textContent;
+      b.textContent = window.rpT('clipboard.copied');
+      setTimeout(() => b.textContent = orig, 2000);
+    }).catch(() => alert(window.rpT('clipboard.copy_failed')));
+  });
+
+  document.getElementById('btn-download').addEventListener('click', () => {
+    const generated = new Date().toISOString();
+    const header = window.rpT('totp_codes.download_header', {username, generated}) + '\n' + '─'.repeat(40) + '\n\n';
+    const blob = new Blob([header + codes + '\n'], {type: 'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  });
+
+  document.getElementById('btn-print').addEventListener('click', () => {
+    const w = window.open('', '_blank', 'width=480,height=600');
+    if (!w) return;
+    const title = window.rpTHtml('totp_codes.print_title');
+    const date = new Date().toLocaleString(document.documentElement.lang);
+    w.document.write(
+      '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title>' +
+      '<style>body{font-family:monospace;padding:30px;line-height:1.8;font-size:14px}' +
+      'h2{margin:0 0 8px}.muted{color:#666;font-size:11px}</style></head><body>' +
+      '<h2>' + title + '</h2>' +
+      '<div class="muted">' + window.rpTHtml('totp_codes.print_metadata', {username, date}) + '</div>' +
+      '<hr><pre>' + window.rpEscapeHtml(codes) + '</pre><hr>' +
+      '<div class="muted">' + window.rpTHtml('totp_codes.print_hint') + '</div>' +
+      '</body></html>'
+    );
+    w.document.documentElement.lang = document.documentElement.lang;
+    w.document.documentElement.dir = document.documentElement.dir;
+    w.document.close();
+    setTimeout(() => w.print(), 200);
+  });
+
+})();
+</script>
+{% endblock %}

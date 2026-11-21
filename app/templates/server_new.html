@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}{{ t('view.server_new.title') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('server_new.create_a_server') }}</h1>
+
+{% if not has_creds %}
+<div class="alert alert-err" style="margin-bottom:14px">
+  <b>{{ t('server_new.factorio_username_and_factorio_token_are_not_set') }}</b>
+  <p>{{ t('servers.mod_download_credentials_hint', builtin='base, elevated-rails, quality, space-age') }}</p>
+  <a href="https://mods.factorio.com" class="link" target="_blank">{{ t('servers.mod_portal_link') }}</a>
+  · <a href="/settings" class="link">{{ t('server_new.set_these_in_settings') }}</a>
+</div>
+{% endif %}
+
+<div class="form-grid">
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('server_new.server_settings') }}</span>
+    </div>
+    <div class="card-body">
+      <form method="post" action="/servers/new" class="form" enctype="multipart/form-data"
+            data-loading="{{ t('server_new.creating_the_server') }}"
+            data-loading-hint="{{ t('server_new.with_a_save_and_mods_pulling_the_docker') }}"
+            data-loading-steps="{{ [t('servers.create_step_validate'), t('servers.create_step_upload_save'),
+                                    t('servers.create_step_detect_mods'), t('servers.create_step_download_mods'),
+                                    t('servers.create_step_save_settings')] | join('|') }}">
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.server_name') }}</span>
+          <input type="text" name="name" required maxlength="40" id="srv-name"
+                 placeholder="my-factorio" autocomplete="off" class="input">
+          <span class="field-hint" id="srv-name-hint">{{ t('server_new.up_to_40_characters_use_a_z_0') }}</span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.factorio_version') }}</span>
+          <input type="text" name="version" required class="input"
+                 list="versions" pattern="\d+\.\d+\.\d+"
+                 value="{{ versions[0] if versions else '' }}"
+                 placeholder="2.0.76">
+          <datalist id="versions">
+            {% for v in versions %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+          <span class="field-hint">
+            {{ t('server_new.image_tags_from_docker_hub_factoriotools_factorio_if') }}
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.save_optional') }}</span>
+          <input type="file" name="initial_save" accept=".zip" class="input">
+          <span class="field-hint">
+            {{ t('servers.initial_save_hint', extension='.zip', path='saves/default.zip') }}
+          </span>
+        </label>
+
+        <div class="form-row">
+          <label class="field">
+            <span class="field-label">{{ t('server_new.port') }}</span>
+            <input type="number" name="port" value="34197" min="1024" max="65535"
+                   required class="input" id="srv-port">
+            <span class="field-hint" id="srv-port-hint">{{ t('server_new.factorio_defaults_to_34197_udp') }}</span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('server_new.player_limit') }}</span>
+            <input type="number" name="max_players" value="0" min="0" max="500"
+                   class="input">
+            <span class="field-hint">{{ t('server_new.0_unlimited') }}</span>
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.visibility') }}</span>
+          <select name="visibility" class="input">
+            <option value="lan" selected>{{ t('server_new.lan_local_network_only') }}</option>
+            <option value="public">{{ t('server_new.public_listed_in_factorios_public_browser') }}</option>
+            <option value="none">{{ t('server_new.none_private_connect_by_ip_only') }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.game_password_optional') }}</span>
+          <span class="pw-input">
+            <input type="password" name="password" maxlength="60" autocomplete="off"
+                   class="input confidential" placeholder="{{ t('server_new.no_password') }}">
+            <button type="button" class="pw-toggle" tabindex="-1"
+                    title="{{ t('server_new.show_or_hide_password') }}">👁</button>
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('server_new.description_motd') }}</span>
+          <textarea name="description" rows="6" maxlength="500" class="input motd-autoresize"
+                    placeholder="{{ t('server_new.describe_this_server_you_can_include_rules_a') }}"
+                    style="min-height:7em;resize:vertical"></textarea>
+        </label>
+
+        <fieldset class="field" style="border:1px solid var(--border-1); padding:10px 12px; border-radius:8px">
+          <legend class="field-label" style="padding:0 6px">{{ t('server_new.map_generation_without_a_save') }}</legend>
+
+          <div class="form-row">
+            <label class="field" style="flex:1">
+              <span class="field-label">{{ t('server_new.preset') }}</span>
+              <select name="map_preset" class="input">
+                {% for preset, label in [
+                    ('default', t('server_new.default_standard')),
+                    ('rich-resources', t('server_new.rich_resources_abundant_resources')),
+                    ('marathon', t('server_new.marathon_slower_progression')),
+                    ('death-world', t('server_new.death_world_more_aggressive_biters')),
+                    ('death-world-marathon', t('server_new.death_world_marathon')),
+                    ('rail-world', t('server_new.rail_world_large_resource_patches')),
+                    ('ribbon-world', t('server_new.ribbon_world_narrow_strip'))] %}
+                  <option value="{{ preset }}" title="{{ preset }}"{% if loop.first %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="field-hint">{{ t('server_new.built_in_factorio_presets_the_preset_is_ignored') }}</span>
+            </label>
+
+            <label class="field" style="flex:1">
+              <span class="field-label">{{ t('server_new.map_seed') }}</span>
+              <input type="number" name="map_seed" min="0" max="4294967295"
+                     value="" class="input" placeholder="{{ t('server_new.leave_blank_for_a_random_seed') }}">
+              <span class="field-hint">{{ t('server_new.0_through_2_1_leave_blank_for_factorio') }}</span>
+            </label>
+          </div>
+
+          <label class="field check-field">
+            <input type="checkbox" name="peaceful_mode" value="1">
+            <span>{{ t('server_new.peaceful_mode_biters_never_attack_first') }}</span>
+          </label>
+        </fieldset>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">{{ t('server_new.create_server') }}</button>
+          <a href="/" class="btn">{{ t('server_new.cancel') }}</a>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="card-head">
+      <span class="card-head-title">{{ t('server_new.what_happens_next') }}</span>
+    </div>
+    <div class="card-body">
+      <ul class="info-list">
+        <li>{{ t('servers.create_folder_hint', path='servers/<uuid>/', mods='mods/', saves='saves/', config='config/') }}</li>
+        <li>{{ t('servers.create_settings_hint', file='server-settings.json') }}</li>
+        <li>{{ t('servers.create_offline_hint') }}</li>
+        <li>{{ t('server_new.mods_saves_and_backups_stay_in_this_servers') }}</li>
+      </ul>
+    </div>
+  </aside>
+
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Persist form state в sessionStorage. Спасает при F5 / случайной навигации:
+  // обычные поля восстанавливаются, файл-инпут — нет (браузер не отдаёт File
+  // обратно из памяти, это безопасностное ограничение). Очищаем когда форма
+  // успешно сабмитится (вход в /servers/<uuid> произойдёт = другая страница).
+  const KEY = 'roboport.server-new.form';
+  const form = document.querySelector('form[action="/servers/new"]');
+  if (!form) return;
+  const FIELDS = [
+    'name', 'version', 'port', 'max_players', 'visibility',
+    'description', 'map_preset', 'map_seed',
+  ];
+  // Restore — но только если поле ещё пустое или дефолтное (чтобы не затирать
+  // server-rendered значения как version=2.0.76).
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(KEY) || '{}');
+    FIELDS.forEach(n => {
+      const el = form.querySelector(`[name="${n}"]`);
+      if (!el || saved[n] === undefined) return;
+      // Не трогаем поле если юзер уже что-то ввёл (на дефолте).
+      if (!el.value || el.defaultValue === el.value) {
+        el.value = saved[n];
+      }
+    });
+    const peace = form.querySelector('[name=peaceful_mode]');
+    if (peace && saved.peaceful_mode !== undefined) peace.checked = !!saved.peaceful_mode;
+  } catch { /* битый JSON в storage — игнорируем */ }
+  // Save при каждом изменении (кроме file и password — пароль в storage не кладём)
+  function snapshot() {
+    const data = {};
+    FIELDS.forEach(n => {
+      const el = form.querySelector(`[name="${n}"]`);
+      if (el) data[n] = el.value;
+    });
+    const peace = form.querySelector('[name=peaceful_mode]');
+    if (peace) data.peaceful_mode = peace.checked;
+    try { sessionStorage.setItem(KEY, JSON.stringify(data)); } catch {}
+  }
+  form.addEventListener('input', snapshot);
+  form.addEventListener('change', snapshot);
+  // На submit — НЕ очищаем сразу (если бэк ответит ошибкой и юзер вернётся,
+  // форму он увидит заполненной). Чистим лениво при следующем открытии этой
+  // страницы успешного создания: бэк делает 303 → /servers/<uuid>?msg=...,
+  // другая страница; sessionStorage переживёт это, поэтому проверяем msg
+  // на /servers/<uuid> мы не можем — компромисс: чистим при beforeunload
+  // ТОЛЬКО если форма прошла валидацию (browser native).
+  form.addEventListener('submit', () => {
+    if (form.checkValidity()) {
+      // Дадим короткий tail, чтобы при ошибке бэка (он отдаёт 400 с rerender'ом)
+      // данные ещё были в storage. В случае успеха пользователь уже на новой
+      // странице — storage не мешает.
+      setTimeout(() => { try { sessionStorage.removeItem(KEY); } catch {} }, 5000);
+    }
+  });
+})();
+
+(function () {
+  // Реалтайм-валидация имени и порта против существующих серверов в БД.
+  // Debounced 300мс — чтобы не дёргать БД на каждый keystroke.
+  // Сервер также валидирует на финальном POST — это защита от race и от
+  // ситуаций «открыты две вкладки, в каждой создаётся сервер с одним именем».
+  const nameInp = document.getElementById('srv-name');
+  const portInp = document.getElementById('srv-port');
+  const nameHint = document.getElementById('srv-name-hint');
+  const portHint = document.getElementById('srv-port-hint');
+  if (!nameInp || !portInp) return;
+  const origNameHint = nameHint.textContent;
+  const origPortHint = portHint.textContent;
+
+  let timer = null;
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(check, 300);
+  }
+  async function check() {
+    const params = new URLSearchParams({
+      name: nameInp.value || '',
+      port: portInp.value || '',
+    });
+    let data;
+    try {
+      const r = await fetch('/servers/new/check?' + params.toString(),
+                            { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) return;
+      data = await r.json();
+    } catch { return; }
+
+    function applyTo(input, hint, origHint, res) {
+      if (!res) return;
+      if (res.ok) {
+        input.style.borderColor = '';
+        hint.textContent = origHint;
+        hint.classList.remove('text-danger');
+      } else {
+        input.style.borderColor = '#e54e4e';
+        hint.textContent = '⚠ ' + (res.conflict || window.rpT('server_new.validation_error'));
+        hint.classList.add('text-danger');
+      }
+    }
+    applyTo(nameInp, nameHint, origNameHint, data.name);
+    applyTo(portInp, portHint, origPortHint, data.port);
+  }
+  nameInp.addEventListener('input', schedule);
+  portInp.addEventListener('input', schedule);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="{{ locale_code }}" dir="{{ locale_dir }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="author" content="Gellou">
+  <title>{{ t('recovery.title') }} — Roboport</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ static_v }}">
+  {% include '_partials/locale_head.html' %}
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-logo" style="background:#ff5630">!</div>
+        <div class="brand-text">
+          <div class="brand-title">ROBOPORT</div>
+          <div class="brand-sub" style="color:#ff5630">{{ t('recovery.mode_label') }}</div>
+        </div>
+        {% include '_partials/locale_picker.html' %}
+      </div>
+
+      <h1 class="login-title">⚡ {{ t('recovery.title') }}</h1>
+      <div class="muted small login-hint">
+        {{ t('recovery.description', upper='K7M3-X9P2', lower='k7m3x9p2') }}
+      </div>
+
+      {% if msg %}<div class="alert alert-ok">{{ msg }}</div>{% endif %}
+      {% if err %}<div class="alert alert-err">{{ err }}</div>{% endif %}
+
+      <form method="post" action="/recovery" class="form login-form"
+            autocomplete="off" spellcheck="false">
+
+        <label class="field">
+          <span class="field-label">{{ t('recovery.log_code') }}</span>
+          <input type="text" name="code" required class="input mono recovery-code"
+                 placeholder="XXXX-XXXX"
+                 maxlength="12" autocomplete="off" autofocus
+                 style="text-transform:uppercase; letter-spacing:.18em; font-size:18px; text-align:center">
+          <span class="field-hint">{{ t('recovery.code_hint', charset='A-Z 2-9') }}</span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('login.username') }}</span>
+          <input type="text" name="username" class="input" maxlength="32" autocomplete="username">
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('recovery.new_password') }}</span>
+          <span class="pw-input">
+            <input type="password" name="new_password" required class="input"
+                   minlength="8" maxlength="256" autocomplete="new-password">
+            <button type="button" class="pw-toggle" aria-label="{{ t('login.toggle_password') }}">👁</button>
+          </span>
+          <span class="field-hint">{{ t('recovery.minimum_password') }}</span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">{{ t('recovery.repeat_password') }}</span>
+          <span class="pw-input">
+            <input type="password" name="new_password2" required class="input"
+                   minlength="8" maxlength="256" autocomplete="new-password">
+            <button type="button" class="pw-toggle" aria-label="{{ t('login.toggle_password') }}">👁</button>
+          </span>
+        </label>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-wide">⚡ {{ t('recovery.reset_password') }}</button>
+        </div>
+      </form>
+
+      <div class="login-foot">
+        <a href="/login" class="muted small">← {{ t('recovery.back_to_login') }}</a>
+        <span class="muted small login-version">v{{ panel_version }} · {{ t('recovery.mode_label') }}</span>
+      </div>
+    </div>
+  </main>
+
+  <script nonce="{{ csp_nonce }}">
+    // Чистим ?msg=/&err= из URL после рендера flash (этот шаблон не extends
+    // base.html — копируем сюда же; см. base.html для основного места).
+    (function () {
+      try {
+        const url = new URL(location.href);
+        if (url.searchParams.has('msg') || url.searchParams.has('err')) {
+          url.searchParams.delete('msg');
+          url.searchParams.delete('err');
+          history.replaceState(null, '', url.toString());
+        }
+      } catch (e) {}
+    })();
+
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('.pw-toggle');
+      if (!btn) return;
+      const inp = btn.parentElement.querySelector('input');
+      if (!inp) return;
+      const showing = inp.type === 'text';
+      inp.type = showing ? 'password' : 'text';
+      btn.textContent = showing ? '👁' : '🙈';
+    });
+    // Auto-uppercase для удобства ввода
+    document.querySelector('input[name=code]').addEventListener('input', e => {
+      const pos = e.target.selectionStart;
+      e.target.value = e.target.value.toUpperCase();
+      e.target.selectionStart = e.target.selectionEnd = pos;
+    });
+  </script>
+</body>
+</html>

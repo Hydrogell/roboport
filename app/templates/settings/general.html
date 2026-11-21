@@ -1,0 +1,144 @@
+<div class="settings-section">
+  <details class="settings-disclosure">
+    <summary>
+      <span>{{ t('settings.general.time_zone') }}</span>
+      <span class="setting-value">{{ env.PANEL_TZ or t('settings.general.system_default') }}</span>
+    </summary>
+    <div class="settings-body">
+      <form id="timezone-form" method="post" action="/settings/env" class="form" data-persist>
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" data-no-persist="1">
+        <input type="hidden" name="section" value="timezone">
+        <label class="field">
+          <span class="field-label">{{ t('settings.general.time_zone_for_the_audit_log_and_schedules') }}</span>
+          <input class="input" name="panel_tz" value="{{ env.PANEL_TZ }}" maxlength="64"
+                 list="panel-tz-list" placeholder="{{ t('settings.general.system_default') }}" autocomplete="off">
+          <datalist id="panel-tz-list">
+            {% if iana_supported %}
+              {% for tz in common_tzs_iana %}<option value="{{ tz }}"></option>{% endfor %}
+            {% endif %}
+            {% for tz in common_tzs %}<option value="{{ tz }}"></option>{% endfor %}
+          </datalist>
+          <span class="field-hint">
+            {% if iana_supported %}{{ t('settings.general.for_example_europe_moscow_or_3') }}{% else %}{{ t('settings.general.for_example_3_or_5_30') }}{% endif %}
+            {{ t('settings.general.leave_blank_to_use_the_system_time_zone') }}
+          </span>
+        </label>
+        <div class="form-actions"><button class="btn btn-primary">{{ t('settings.general.save') }}</button></div>
+      </form>
+    </div>
+  </details>
+
+  <details class="settings-disclosure" id="factorio-account">
+    <summary>
+      <span>{{ t('settings.general.factorio_com_account') }}</span>
+      {% if env.FACTORIO_USERNAME and env.FACTORIO_TOKEN_SET %}
+        <span class="setting-value confidential">{{ env.FACTORIO_USERNAME }}</span>
+      {% elif env.FACTORIO_USERNAME %}
+        <span class="setting-value">{{ t('settings.general.token_required') }}</span>
+      {% elif env.FACTORIO_TOKEN_SET %}
+        <span class="setting-value">{{ t('settings.general.username_required') }}</span>
+      {% else %}
+        <span class="setting-value">{{ t('settings.general.configure') }}</span>
+      {% endif %}
+    </summary>
+    <div class="settings-body">
+      <p>{{ t('settings.general.this_account_is_required_to_download_mods_and') }}</p>
+      <form id="factorio-form" method="post" action="/settings/env" class="form" autocomplete="off" data-persist>
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" data-no-persist="1">
+        <input type="hidden" name="section" value="factorio">
+        <label class="field">
+          <span class="field-label">{{ t('settings.general.factorio_com_username') }}</span>
+          <input type="text" name="username" class="input confidential" maxlength="60" value="{{ env.FACTORIO_USERNAME }}">
+        </label>
+        <div class="field">
+          <label class="field-label" for="factorio-token">{{ t('settings.general.access_token') }}</label>
+          <span class="pw-input">
+            <input id="factorio-token" type="password" name="token" class="input confidential"
+                   data-no-persist="1" aria-describedby="token-help" autocomplete="off"
+                   {% if env.FACTORIO_TOKEN_SET %}placeholder="{{ env.FACTORIO_TOKEN_MASK }}"{% endif %}>
+            <button type="button" class="pw-toggle" aria-label="{{ t('settings.general.show_or_hide_the_token') }}">👁</button>
+          </span>
+          <span class="field-hint" id="token-help">
+            {% if env.FACTORIO_TOKEN_SET %}{{ t('settings.general.leave_blank_to_keep_the_current_token') }}{% endif %}
+            <a href="https://www.factorio.com/profile" target="_blank" rel="noopener">{{ t('settings.general.find_your_token_in_your_factorio_profile') }}</a>
+          </span>
+        </div>
+        {% if env.FACTORIO_TOKEN_SET %}
+          <label class="check-field"><input type="checkbox" name="clear_token" value="1"> {{ t('settings.general.delete_saved_token') }}</label>
+        {% endif %}
+        <div class="form-actions"><button class="btn btn-primary">{{ t('settings.general.save') }}</button></div>
+      </form>
+    </div>
+  </details>
+
+  <details class="settings-disclosure">
+    <summary>
+      <span>{{ t('settings.general.start_the_panel_automatically') }}</span>
+      <span class="setting-value">{{ (t('settings.general.enabled') if autostart.enabled else t('settings.general.disabled')) if autostart.available else t('settings.general.unavailable') }}</span>
+    </summary>
+    <div class="settings-body">
+      {% if autostart.available %}
+        <p>{{ t('settings.general.start_roboport_when_the_system_boots') }}</p>
+        <form method="post" action="/settings/panel-autostart">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="enable" value="{{ '0' if autostart.enabled else '1' }}">
+          <button class="btn">{{ t('settings.general.disable_automatic_startup') if autostart.enabled else t('settings.general.enable_automatic_startup') }}</button>
+        </form>
+      {% else %}
+        <p>{{ autostart.note }}</p>
+      {% endif %}
+    </div>
+  </details>
+
+  <details class="settings-disclosure">
+    <summary><span>{{ t('settings.general.file_editor') }}</span><span class="setting-value" id="editor-pref-status">{{ t('settings.editor_auto') }}</span></summary>
+    <div class="settings-body">
+      <fieldset class="settings-choices" id="editor-pref-seg">
+        <legend>{{ t('settings.general.editor_for_this_browser') }}</legend>
+        <label><input type="radio" name="editor_pref" value="auto" checked> {{ t('settings.editor_auto') }}</label>
+        <label><input type="radio" name="editor_pref" value="monaco"> {{ t('settings.general.monaco_online') }}</label>
+        <label><input type="radio" name="editor_pref" value="codemirror"> {{ t('settings.general.codemirror_built_in') }}</label>
+      </fieldset>
+    </div>
+  </details>
+</div>
+
+<div class="settings-section">
+  <details class="settings-disclosure">
+    <summary><span>{{ t('settings.general.system_information') }}</span></summary>
+    <div class="settings-body">
+      <dl class="settings-facts">
+        <dt>{{ t('settings.general.panel_directory') }}</dt><dd><code class="confidential">{{ info.root }}</code></dd>
+        <dt>{{ t('settings.general.configuration_file') }}</dt><dd><code class="confidential">{{ env_path }}</code></dd>
+        <dt>{{ t('settings.general.sqlite_database') }}</dt><dd><code class="confidential">{{ info.db_path }}</code> · {{ info.db_size }}</dd>
+        <dt>{{ t('settings.general.servers_directory') }}</dt><dd><code class="confidential">{{ info.servers_dir }}</code> · {{ info.servers_dir_size }}</dd>
+        <dt>{{ t('dashboard_stats.servers') }}</dt><dd>{{ info.servers_count }}</dd>
+        <dt>{{ t('settings.general.active_player_sessions') }}</dt><dd>{{ info.sessions_open }}</dd>
+        <dt>{{ t('settings.general.metrics_samples') }}</dt><dd>{{ info.samples_total }}{% if info.last_sample_ts %}{{ t('settings.general.latest') }} {{ info.last_sample_ts | unixtime(with_rel=False) }}{% endif %}</dd>
+        <dt>{{ t('settings.general.docker_hub_version_cache') }}</dt>
+        <dd>{% if info.versions_cache_n %}{{ t('settings.general.versions_cache_n_versions', versions_cache_n=(info.versions_cache_n)) }}{% if info.versions_cache_age is not none %} {{ t('settings.general.age_value_min_expires_after_value2_min', value=(info.versions_cache_age // 60), value2=(info.versions_cache_ttl // 60)) }}{% endif %}{% else %}{{ t('settings.general.empty') }}{% endif %}</dd>
+        <dt>{{ t('settings.general.platform') }}</dt><dd>{{ autostart.platform }}</dd>
+        {% if autostart.available %}
+          <dt>{{ t('settings.general.automatic_startup_method') }}</dt><dd>{{ autostart.note }}{% if autostart.path %} <code class="confidential">{{ autostart.path }}</code>{% endif %}</dd>
+        {% endif %}
+      </dl>
+    </div>
+  </details>
+  <details class="settings-disclosure">
+    <summary><span>{{ t('settings.general.panel_maintenance') }}</span></summary>
+    <div class="settings-body">
+      <div class="action-row">
+        <form method="post" action="/settings/clear-versions-cache">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button class="btn">{{ t('settings.general.clear_version_cache') }}</button>
+        </form>
+        <form method="post" action="/settings/prune-metrics" data-confirm="{{ t('settings.general.delete_metrics_and_completed_player_sessions_older_than') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button class="btn">{{ t('settings.general.clear_old_metrics') }}</button>
+        </form>
+        <button type="button" class="btn" id="panel-restart-btn">{{ t('settings.general.restart_the_panel') }}</button>
+      </div>
+      <p class="field-hint">{{ t('settings.general.metrics_are_collected_every_30_seconds_and_stored') }}</p>
+    </div>
+  </details>
+</div>

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ t('error.title', status=status_code) }} — Roboport{% endblock %}
+
+{% block content %}
+<h1 class="page-title">⚠ {{ t('error.title', status=status_code) }}</h1>
+
+<section class="card">
+  <div class="card-body">
+    <div class="alert alert-err" style="margin-bottom:14px">
+      <b>{{ title }}</b>
+      <div class="muted small" style="margin-top:6px">
+        {{ t('error.path') }}: <code class="mono">{{ path }}</code>
+      </div>
+    </div>
+
+    {% if detail %}
+    <div class="meta-row" style="margin-bottom:8px">
+      <span class="meta-label">{{ t('error.details') }}:</span>
+    </div>
+    <pre class="alert-pre" style="white-space:pre-wrap; word-break:break-word">{{ detail }}</pre>
+    {% endif %}
+
+    <div class="muted small" style="margin-top:18px">
+      {{ t('error.try_return') }} <a class="link" href="javascript:history.back()">{{ t('common.back') }}</a>
+      {{ t('common.or') }} <a class="link" href="/">{{ t('error.dashboard') }}</a>.
+      {{ t('error.full_log') }}: <code class="mono">journalctl -u roboport -n 100</code>
+    </div>
+  </div>
+</section>
+{% endblock %}

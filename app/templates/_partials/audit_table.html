@@ -1,0 +1,62 @@
+{# Тело журнала: таблица + пагинация + empty-state. Контейнер
+   id='audit-table-region' — JS на settings.html свопает innerHTML каждые 30с
+   когда вкладка #audit активна. Форма фильтра остаётся снаружи (она
+   submit'ится обычным GET, не через polling). #}
+<div id="audit-table-region">
+{% if audit_rows %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>{{ t('audit_table.when') }}</th>
+      <th>{{ t('audit_table.action') }}</th>
+      <th>{{ t('audit_table.server') }}</th>
+      <th>{{ t('audit_table.details') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in audit_rows %}
+    <tr>
+      <td class="num muted">{{ r.ts | unixtime }}</td>
+      <td><code class="mono">{{ r.kind }}</code></td>
+      <td>
+        {% if r.server_uuid %}
+          {% if r.server_name %}<a class="link" href="/servers/{{ r.server_uuid }}">{{ r.server_name }}</a>
+          {% else %}<span class="muted small">{{ r.server_uuid[:8] }}…</span>{% endif %}
+        {% else %}<span class="muted small">—</span>{% endif %}
+      </td>
+      <td class="muted small">{{ r.summary }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if audit_filter.pages > 1 %}
+  {% set base = '/settings?' ~ ('audit_kind=' ~ audit_filter.kind ~ '&' if audit_filter.kind else '') ~ ('audit_server=' ~ audit_filter.server ~ '&' if audit_filter.server else '') ~ 'audit_per=' ~ audit_filter.per ~ '&audit_page=' %}
+  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;justify-content:center">
+    {% if audit_filter.page > 1 %}
+      <a href="{{ base }}{{ audit_filter.page - 1 }}#audit" class="btn btn-sm">{{ t('audit_table.previous') }}</a>
+    {% else %}
+      <span class="btn btn-sm" style="opacity:.4;pointer-events:none">{{ t('audit_table.previous_label') }}</span>
+    {% endif %}
+    <span class="muted small">{{ audit_filter.page }} / {{ audit_filter.pages }}</span>
+    {% if audit_filter.page < audit_filter.pages %}
+      <a href="{{ base }}{{ audit_filter.page + 1 }}#audit" class="btn btn-sm">{{ t('audit_table.next') }}</a>
+    {% else %}
+      <span class="btn btn-sm" style="opacity:.4;pointer-events:none">{{ t('audit_table.next_label') }}</span>
+    {% endif %}
+  </div>
+{% endif %}
+{% else %}
+<div class="muted small">
+  {% if audit_filter.kind or audit_filter.server %}{{ t('partials.audit_table.nothing_matched_the_current_filters') }}
+  {% else %}{{ t('partials.audit_table.the_audit_log_is_empty_server_starts_stops') }}{% endif %}
+</div>
+{% endif %}
+</div>
+
+{# Header-counter тоже частично динамичный — обновляется в polling'е через
+   data-attribute. Сидит в card-head и читается JS'ом. #}
+<span id="audit-counter" hidden
+      data-total="{{ audit_filter.total }}"
+      data-page="{{ audit_filter.page }}"
+      data-pages="{{ audit_filter.pages }}"></span>

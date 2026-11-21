@@ -1,0 +1,59 @@
+{# 4 stat-карточки дашборда. Контейнер id='dash-stats-grid' — JS свопает
+   innerHTML при live-polling. Источник правды для full-page и для fragment'а. #}
+<section class="card-grid" id="dash-stats-grid">
+  <div class="card stat-card">
+    <div class="stat-head">{{ t('dashboard_stats.host') }}</div>
+    <div class="stat-row">
+      <span class="stat-label">{{ t('dashboard_stats.cpu_usage') }}</span>
+      <span class="stat-value">
+        {% if host.cpu_percent is not none %}{{ '%.1f'|format(host.cpu_percent) }}%
+        {% else %}<span class="muted small">—</span>{% endif %}
+      </span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">{{ t('dashboard_stats.memory_usage') }}</span>
+      <span class="stat-value">
+        {% if host.mem_percent is not none %}{{ '%.1f'|format(host.mem_percent) }}%
+        {% else %}<span class="muted small">—</span>{% endif %}
+      </span>
+    </div>
+    {% if host.cpu_percent is none %}
+    <div class="muted small" style="margin-top:6px">
+      {{ t('partials.dashboard_stats.install') }} <code class="mono">psutil</code> {{ t('partials.dashboard_stats.or_run_on_linux_where_roboport_reads_proc') }}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card stat-card">
+    <div class="stat-head">{{ t('dashboard_stats.servers') }}</div>
+    <div class="stat-big">{{ servers|length }}</div>
+    <div class="stat-row">
+      <span class="stat-label dot-online">{{ t('dashboard_stats.online') }}</span>
+      <span class="stat-value">{{ servers_online }}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label dot-offline">{{ t('dashboard_stats.offline') }}</span>
+      <span class="stat-value">{{ servers_offline }}</span>
+    </div>
+  </div>
+
+  <div class="card stat-card">
+    <div class="stat-head">{{ t('dashboard_stats.players') }}</div>
+    <div class="stat-big">{{ players_total }}</div>
+    <div class="stat-row">
+      <span class="stat-label">{{ t('dashboard_stats.todays_peak') }}</span>
+      <span class="stat-value">{{ players_peak_today }}</span>
+    </div>
+  </div>
+
+  <div class="card stat-card">
+    <div class="stat-head">{{ t('dashboard_stats.disk') }}</div>
+    <div class="stat-row">
+      <span class="stat-label">{{ '%.1f'|format(host.disk_used_gb) }} GB / {{ '%.1f'|format(host.disk_total_gb) }} GB</span>
+    </div>
+    <div class="bar">
+      {% set pct = (host.disk_used_gb / host.disk_total_gb * 100) if host.disk_total_gb else 0 %}
+      <div class="bar-fill" style="width: {{ '%.1f'|format(pct) }}%"></div>
+    </div>
+  </div>
+</section>

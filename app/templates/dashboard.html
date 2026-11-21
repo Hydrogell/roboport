@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.panel') }} — Roboport{% endblock %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', path='css/overviews-mobile.css') }}?v={{ static_v }}">
+{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('nav.panel') }}</h1>
+
+{% if page_msg %}<div class="alert alert-ok">{{ page_msg }}</div>{% endif %}
+{% if page_err %}<div class="alert alert-err">{{ page_err }}</div>{% endif %}
+
+{% include "_partials/dashboard_stats.html" %}
+
+{% if orphans_count %}
+<div class="alert" style="background:rgba(255,140,26,.10); border:1px solid rgba(255,140,26,.4); color:var(--text-1)">
+  {{ t('dashboard.orphaned_folders', count=orphans_count) }}
+  <a href="/servers/import" class="link">→ {{ t('dashboard.import') }}</a>
+</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <span class="card-head-title">⚙ {{ t('dashboard.all_servers') }}</span>
+    <span style="display:flex; gap:6px">
+      {% if orphans_count %}<a href="/servers/import" class="btn btn-sm">📁 {{ t('dashboard.import_with_count', count=orphans_count) }}</a>{% endif %}
+      <a href="/servers/new" class="btn btn-primary btn-sm">＋ {{ t('nav.new_server') }}</a>
+    </span>
+  </div>
+  <div class="card-body table-scroll dashboard-servers-scroll" tabindex="0">
+    <table class="data-table" id="dash-servers-table">
+      <thead>
+        <tr>
+          <th>{{ t('dashboard.server') }}</th>
+          <th>{{ t('common.actions') }}</th>
+          <th>CPU</th>
+          <th>{{ t('dashboard.memory') }}</th>
+          <th>{{ t('dashboard.players') }}</th>
+          <th>{{ t('common.status') }}</th>
+        </tr>
+      </thead>
+      {% include "_partials/dashboard_tbody.html" %}
+    </table>
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Live-обновление дашборда: каждые 8с фетчим /dashboard/live и заменяем
+  // innerHTML двух блоков (id='dash-stats-grid' и id='dash-tbody'). При
+  // ошибке (сеть/500) тихо ждём следующий тик. При document.hidden — пауза,
+  // не дёргаем БД пока вкладка не активна.
+  const URL = '/dashboard/live';
+  const INTERVAL_MS = 8000;
+  let timer = null;
+  let inflight = false;
+
+  async function tick() {
+    if (inflight || document.hidden) return;
+    inflight = true;
+    try {
+      const r = await fetch(URL, { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) return;
+      const html = await r.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      // Заменяем блоки если оба нашлись и в DOM, и в ответе
+      ['dash-stats-grid', 'dash-tbody'].forEach(id => {
+        const fresh = doc.getElementById(id);
+        const cur = document.getElementById(id);
+        if (fresh && cur) cur.innerHTML = fresh.innerHTML;
+      });
+    } catch { /* проглатываем — попробуем на следующем тике */ }
+    finally { inflight = false; }
+  }
+
+  // На первом запуске не дёргаем сразу — сервер только что отрендерил страницу.
+  timer = setInterval(tick, INTERVAL_MS);
+  // Когда вкладка снова видна — догоним один раз сразу, не ждём 8с
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) tick();
+  });
+})();
+</script>
+{% endblock %}

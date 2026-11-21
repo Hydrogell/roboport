@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ t('api_key_requests.label_requests_roboport', label=(key.name)) }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('api_key_requests.requests_made_using_key_label', label=(key.name)) }}</h1>
+<div class="muted small" style="margin-bottom:14px">
+  <a href="/settings#integrations" class="link">{{ t('api_key_requests.back_to_api_keys') }}</a>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <span class="card-head-title">{{ t('api_key_requests.last_100_requests') }}</span>
+    <span class="muted small">{{ t('api_key_requests.kept_for_30_days_showing_requests', requests=(requests|length)) }}</span>
+  </div>
+  <div class="card-body">
+
+    {% if requests %}
+    <table class="data-table" style="font-size:12px">
+      <thead>
+        <tr>
+          <th>{{ t('audit_table.when') }}</th>
+          <th>{{ t('api_key_requests.method') }}</th>
+          <th>{{ t('api_key_requests.path') }}</th>
+          <th>{{ t('schedule.status') }}</th>
+          <th>{{ t('api_key_requests.duration') }}</th>
+          <th>IP</th>
+          <th>{{ t('api_key_requests.user_agent') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in requests %}
+        <tr>
+          <td class="num muted small">{{ r.ts | unixtime }}</td>
+          <td><code class="mono">{{ r.method }}</code></td>
+          <td><code class="mono">{{ r.path }}</code></td>
+          <td>
+            {% if r.status >= 500 %}<span class="status status-error">{{ r.status }}</span>
+            {% elif r.status >= 400 %}<span class="status status-error">{{ r.status }}</span>
+            {% elif r.status >= 300 %}<span class="status status-offline">{{ r.status }}</span>
+            {% else %}<span class="status status-online">{{ r.status }}</span>{% endif %}
+          </td>
+          <td class="num">{{ r.duration_ms }}ms</td>
+          <td class="mono confidential">{{ r.ip or '—' }}</td>
+          <td class="muted small" style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+              title="{{ r.user_agent or '' }}">
+            {{ r.user_agent or '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      {{ t('api_key_requests.no_requests_for_this_key_in_the_last') }}
+    </div>
+    {% endif %}
+
+    <div class="muted small" style="margin-top:14px">
+      {{ t('api_key_requests.for_bots') }} <code class="mono">GET /api/v1/keys/me/requests?limit=100</code>
+      {{ t('api_key_requests.returns_the_same_data_in_json_for_the') }}
+    </div>
+
+  </div>
+</section>
+{% endblock %}

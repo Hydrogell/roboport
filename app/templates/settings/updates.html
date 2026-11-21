@@ -1,0 +1,120 @@
+<section class="settings-section">
+  <div class="settings-body">
+    <div class="settings-update-head">
+      <div>
+        <h2>{{ t('settings.updates.panel_version') }}</h2>
+        <p class="settings-version">{{ panel_update.current_version }}</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="panel-update-check-btn">{{ t('settings.updates.check_for_updates') }}</button>
+    </div>
+    <p id="panel-update-check-state" role="status" hidden></p>
+    <div id="panel-update-check-result" hidden></div>
+    {% if panel_update.is_windows %}
+      <p class="field-hint">{{ t('settings.updates.on_windows_update_the_panel_manually_stop_it') }}</p>
+    {% endif %}
+  </div>
+  <details class="settings-disclosure">
+    <summary><span>{{ t('settings.updates.update_source') }}</span><span class="setting-value">{{ panel_update.repo }}</span></summary>
+    <div class="settings-body">
+      <form method="post" action="/settings/panel-update/repo" class="form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label class="field">
+          <span class="field-label">{{ t('settings.updates.github_repository') }}</span>
+          <input type="text" name="repo" class="input" value="{{ panel_update.repo }}"
+                 placeholder="{{ t('settings.updates.owner_repository') }}" pattern="[a-zA-Z0-9._\-]+/[a-zA-Z0-9._\-]+">
+        </label>
+        <div class="form-actions"><button class="btn btn-primary">{{ t('settings.general.save') }}</button></div>
+      </form>
+    </div>
+  </details>
+  <details class="settings-disclosure">
+    <summary>
+      <span>{{ t('settings.updates.install_from_archive') }}</span>
+      {% if panel_update.staging_files %}<span class="setting-value">{{ t('settings.updates.uploaded_staging_files', staging_files=(panel_update.staging_files|length)) }}</span>{% endif %}
+    </summary>
+    <div class="settings-body">
+      <form method="post" action="/settings/panel-update/upload" enctype="multipart/form-data" class="form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label class="field">
+          <span class="field-label">{{ t('settings.updates.panel_archive_tar_gz_tgz_or_zip') }}</span>
+          <input type="file" name="file" class="input" accept=".tar.gz,.tgz,.zip,application/gzip,application/zip" required>
+        </label>
+        <div class="form-actions"><button class="btn">{{ t('settings.updates.upload_archive') }}</button></div>
+      </form>
+      {% set files = panel_update.staging_files %}
+      {% if files %}
+        <form method="post" action="/settings/panel-update/install" class="form"
+              data-confirm="{{ t('settings.updates.install_the_selected_archive_and_restart_the_panel') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="source" value="upload">
+          {% if files|length == 1 %}
+            <input type="hidden" name="upload_filename" value="{{ files[0].name }}">
+            <p>{{ files[0].name }} · {{ (files[0].size / 1024)|round|int }} {{ t('settings.updates.kb') }} {{ files[0].mtime | unixtime(with_rel=False) }}</p>
+          {% else %}
+            <label class="field">
+              <span class="field-label">{{ t('settings.updates.uploaded_archives') }}</span>
+              <select name="upload_filename" class="input" required>
+                {% for f in files %}
+                  <option value="{{ f.name }}">{{ f.name }} · {{ (f.size / 1024)|round|int }} {{ t('settings.updates.kb') }} {{ f.mtime | unixtime(with_rel=False) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          {% endif %}
+          <div class="form-actions"><button class="btn btn-primary">{{ t('settings.updates.install_archive') }}</button></div>
+        </form>
+      {% endif %}
+    </div>
+  </details>
+</section>
+
+<details class="settings-section settings-disclosure">
+  <summary><span>{{ t('settings.updates.update_history_and_rollback') }}</span></summary>
+  <div class="settings-body">
+    {% if panel_update.history %}
+      {% set statuses = {'success':t('settings.updates.installed'), 'running':t('settings.updates.in_progress'), 'rolled-back':t('settings.updates.cancelled'), 'failed':t('settings.updates.error')} %}
+      <div class="settings-table">
+        <table class="data-table">
+          <thead><tr><th>{{ t('audit_table.when') }}</th><th>{{ t('settings.updates.versions') }}</th><th>SHA</th><th>{{ t('settings.updates.source') }}</th><th>{{ t('settings.updates.initiated_by') }}</th><th>{{ t('settings.updates.result') }}</th><th></th></tr></thead>
+          <tbody>
+            {% for u in panel_update.history %}
+              <tr>
+                <td>{{ u.started_at | unixtime }}</td>
+                <td>{{ u.from_version or '—' }} → {{ u.to_version or '—' }}</td>
+                <td title="{{ u.archive_sha256 or '' }}"><code>{{ u.archive_sha256[:8] if u.archive_sha256 else '—' }}</code></td>
+                <td>{{ u.source }}</td><td>{{ u.initiated_by or '—' }}</td>
+                <td>{{ statuses.get(u.status, u.status) }}{% if u.error %}<div class="field-hint">{{ u.error }}</div>{% endif %}</td>
+                <td>
+                  {% if u.backup_dir and u.status == 'success' %}
+                    <form method="post" action="/settings/panel-update/rollback/{{ u.id }}"
+                          data-confirm="{{ t('settings.updates.roll_back_to_the_version_before_update_id', id=(u.id)) }}">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                      <button class="btn btn-sm">{{ t('settings.updates.roll_back') }}</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>{{ t('settings.updates.no_updates_yet') }}</p>
+    {% endif %}
+  </div>
+</details>
+
+<template id="update-release">
+  <div class="settings-release">
+    <strong data-release-title></strong>
+    <p class="field-hint" data-release-date></p>
+    <details data-release-notes><summary>{{ t('settings.updates.whats_new') }}</summary><pre></pre></details>
+    <form method="post" action="/settings/panel-update/install" class="action-row"
+          data-confirm="{{ t('settings.updates.install_the_update_and_restart_the_panel') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="source" value="github">
+      <input type="hidden" name="tag">
+      <button class="btn btn-primary">{{ t('settings.updates.install') }}</button>
+      <a class="btn" data-release-link target="_blank" rel="noopener">{{ t('settings.updates.github_release') }}</a>
+    </form>
+  </div>
+</template>

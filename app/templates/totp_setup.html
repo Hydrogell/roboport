@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ t('totp_setup.set_up_2fa_roboport') }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">{{ t('totp_setup.set_up_two_factor_authentication') }}</h1>
+
+{% if msg %}<div class="alert alert-ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="alert alert-err">{{ err }}</div>{% endif %}
+
+<section class="card" style="max-width:640px">
+  <div class="card-body">
+
+    <p>
+      {{ t('totp_setup.app_and_secret_hint', protocol='otpauth://', apps='Google Authenticator, Authy, Aegis, 1Password') }}
+    </p>
+
+    {% if qr_svg %}
+    <h3 style="margin-top:18px; font-size:14px">{{ t('totp_setup.method_1_scan_the_qr_code') }}</h3>
+    <div class="qr-wrap">
+      {{ qr_svg | safe }}
+    </div>
+    <div class="muted small" style="text-align:center; margin-bottom:14px">
+      {{ t('totp_setup.open_the_app_add_account_scan_qr_code') }}
+    </div>
+    {% else %}
+    {# QR не сгенерировался — qrcode пакет не установлен или упал.
+       Юзер всё ещё может настроить 2FA через секрет/URL ниже. #}
+    <div class="alert alert-warn" style="margin-top:14px">
+      <b>{{ t('totp_setup.qr_code_unavailable') }}</b>
+      <p>{{ t('totp_setup.qr_unavailable_hint', package='qrcode') }}</p>
+      <code class="mono">pip install -r requirements.txt</code>
+    </div>
+    {% endif %}
+
+    <h3 style="margin-top:18px; font-size:14px">{{ t('totp_setup.method_2_enter_the_secret_manually') }}</h3>
+    <div class="muted small" style="margin-bottom:6px">
+      {{ t('totp_setup.in_your_authenticator_app_choose_add_account_enter') }}
+    </div>
+    <div style="background:var(--bg-3, rgba(255,140,26,.08));
+                border:1px solid rgba(255,140,26,.35);
+                border-radius:6px; padding:10px 14px; margin:8px 0">
+      <div class="muted small">{{ t('totp_setup.account_name') }} <code class="mono">Roboport:{{ username }}</code></div>
+      <div class="muted small" style="margin-top:6px">{{ t('totp_setup.account_type') }}</div>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+        <code id="secret-text" class="mono confidential"
+              style="font-size:15px; letter-spacing:.15em; user-select:all; flex:1; min-width:240px">{{ secret_display }}</code>
+        <button type="button" class="btn btn-sm" id="btn-copy-secret">{{ t('api_key_show.copy') }}</button>
+      </div>
+    </div>
+
+    <details style="margin:8px 0 14px">
+      <summary class="muted small" style="cursor:pointer">{{ t('totp_setup.otpauth_url_for_apps_that_cannot_scan_a') }}</summary>
+      <div style="background:var(--bg-3, rgba(255,140,26,.08));
+                  border:1px solid rgba(255,140,26,.35);
+                  border-radius:6px; padding:10px 14px; margin:8px 0; word-break:break-all">
+        <code id="otpauth-text" class="mono confidential"
+              style="font-size:11px; user-select:all">{{ otpauth }}</code>
+      </div>
+      <button type="button" class="btn btn-sm" id="btn-copy-url">{{ t('totp_setup.copy_url') }}</button>
+    </details>
+
+    <hr style="border:none; border-top:1px solid var(--border-1); margin:18px 0">
+
+    <h3 style="font-size:14px">{{ t('totp_setup.confirmation') }}</h3>
+    <p class="muted small">
+      {{ t('totp_setup.confirm_account_code', account='Roboport:' ~ username) }}
+    </p>
+    <form method="post" action="/settings/2fa/confirm" class="form">
+      <div class="form-row">
+        <label class="field" style="max-width:220px">
+          <span class="field-label">{{ t('totp_setup.code') }}</span>
+          <input type="text" name="code" required class="input mono"
+                 inputmode="numeric" pattern="[0-9 ]*"
+                 minlength="6" maxlength="9" autofocus
+                 placeholder="000000"
+                 style="text-align:center; font-size:18px; letter-spacing:.3em">
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">{{ t('totp_setup.confirm_and_enable_2fa') }}</button>
+        <a href="/settings#security" class="btn">{{ t('server_new.cancel') }}</a>
+      </div>
+    </form>
+
+    <div class="muted small" style="margin-top:18px; padding-top:12px;
+         border-top:1px solid var(--border-1)">
+      {{ t('totp_setup.backup_codes_hint', count=10, extension='.txt') }}
+    </div>
+  </div>
+</section>
+
+<style>
+.qr-wrap {
+  width: 280px;
+  max-width: 100%;
+  margin: 14px auto 6px;
+  padding: 14px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+}
+.qr-wrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+</style>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+  function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = window.rpT('clipboard.copied');
+      setTimeout(() => btn.textContent = orig, 2000);
+    }).catch(() => alert(window.rpT('clipboard.copy_failed')));
+  }
+  document.getElementById('btn-copy-secret').addEventListener('click', e => {
+    // Копируем БЕЗ пробелов — приложения обычно принимают как с пробелами, так и без,
+    // но без пробелов компактнее и безопаснее от автокоррекций
+    const txt = document.getElementById('secret-text').textContent.replace(/\s+/g, '');
+    copyText(txt, e.target);
+  });
+  document.getElementById('btn-copy-url').addEventListener('click', e => {
+    copyText(document.getElementById('otpauth-text').textContent, e.target);
+  });
+})();
+</script>
+{% endblock %}
