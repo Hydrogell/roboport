@@ -26,7 +26,7 @@ Roboport Controller позволяет управлять несколькими
 
 ## Быстрый старт
 
-Скачай архив исходников со [страницы релиза **v1.0.0**](https://github.com/Hydrogell/roboport/releases/tag/v1.0.0), распакуй и открой терминал в папке с файлом `VERSION`.
+Скачай архив исходников со [страницы последнего релиза](https://github.com/Hydrogell/roboport/releases/latest), распакуй и открой терминал в папке с файлом `VERSION`.
 
 **Linux · Debian или Ubuntu.** Для установки нужен доступ к `sudo`.
 

@@ -26,7 +26,7 @@ Roboport Controller lets you manage multiple independent Factorio servers from a
 
 ## Quick start
 
-Download and extract the source archive from the [**v1.0.0 release**](https://github.com/Hydrogell/roboport/releases/tag/v1.0.0). Open a terminal in the directory containing `VERSION`.
+Download and extract the source archive from the [latest release](https://github.com/Hydrogell/roboport/releases/latest). Open a terminal in the directory containing `VERSION`.
 
 **Linux · Debian or Ubuntu.** Run the installer on a host with `sudo` access.
 
