@@ -49,11 +49,11 @@ _ALLOWED_REF_RE = re.compile(r'(?:^|[^\w])allowed_values\s*=\s*([A-Za-z_][\w]*)\
 #   local foo = {"a", "b"}
 #   local foo = function() return {"a", "b"} end
 _LOCAL_LIST_RE = re.compile(
-    r'\blocal\s+([A-Za-z_]\w*)\s*=\s*\{((?:[^{}]|\\\")*?)\}',
+    r'\blocal\s+([A-Za-z_]\w*)\s*=\s*\{([^{}]*)\}',
     re.DOTALL,
 )
 _LOCAL_FN_LIST_RE = re.compile(
-    r'\blocal\s+([A-Za-z_]\w*)\s*=\s*function\s*\([^)]*\)\s*return\s*\{((?:[^{}]|\\\")*?)\}\s*end',
+    r'\blocal\s+([A-Za-z_]\w*)\s*=\s*function\s*\([^)]*\)\s*return\s*\{([^{}]*)\}\s*end',
     re.DOTALL,
 )
 

@@ -179,8 +179,8 @@ async def mods_import(uuid: str, file: UploadFile = File(...),
         elif kind == "mod":
             try:
                 m = factorio_mods.install_mod_from_zip(tmp, server_dir / "mods")
-            except ValueError as e:
-                return {"ok": False, "kind": "mod", "message": str(e)}
+            except factorio_mods.InvalidModArchive as exc:
+                return {"ok": False, "kind": "mod", "message": str(exc)}
             return {"ok": True, "kind": "mod",
                     "message": tr("mods.import_mod_installed", title=m['title'], version=m['version']),
                     "details": m}

@@ -106,6 +106,22 @@ def test_api_syncs_mod_cache_without_external_portal(mods_api, monkeypatch, endp
         assert result == {"uuid": SERVER_ID, "synced": True, "results": []}
 
 
+@pytest.mark.parametrize("endpoint", ["sync", "bulk-update"])
+def test_api_mod_portal_error_excludes_internal_diagnostics(mods_api, monkeypatch, endpoint):
+    client, _, _ = mods_api
+
+    def unavailable(url):
+        raise OSError("private diagnostic marker")
+
+    monkeypatch.setattr(mods, "http_get_json", unavailable)
+    body = {"all": True, "sync_first": True} if endpoint == "bulk-update" else None
+    response = client.post(f"/api/v1/servers/{SERVER_ID}/mods/{endpoint}", json=body)
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "portal_unreachable"
+    assert "private diagnostic marker" not in response.text
+
+
 def test_api_installs_a_new_mod_in_the_mod_directory(mods_api, monkeypatch):
     client, _, mods_dir = mods_api
     _mock_portal_downloads(monkeypatch, "new-mod")
@@ -165,8 +181,8 @@ def test_api_reports_failed_bulk_update_when_no_archive_was_installed(mods_api, 
 
 @pytest.mark.parametrize(("failure", "expected_error"), [
     (None, None),
-    ("download", "controlled download failure"),
-    ("old-file-locked", "controlled file lock"),
+    ("download", "download_failed"),
+    ("old-file-locked", "install_failed"),
     ("stale-catalog", "not-on-portal"),
 ])
 def test_api_bulk_update_replaces_mod_or_keeps_previous(mods_api, monkeypatch, failure, expected_error):
@@ -204,3 +220,29 @@ def test_api_bulk_update_replaces_mod_or_keeps_previous(mods_api, monkeypatch, f
             "name": MOD_NAME, "from": "1.0.0", "to": "1.1.0", "ok": True,
         }]
         assert {p.name for p in mods_dir.iterdir()} == {f"{MOD_NAME}_1.1.0.zip"}
+
+
+def test_import_replaces_only_the_named_mod(tmp_path):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    installed = _make_archive(mods_dir, "copper tools", "1.0.0")
+    other = _make_archive(mods_dir, "copper tools_extended", "1.0.0")
+    upload = _make_archive(tmp_path, "copper tools", "1.1.0")
+
+    result = mods.install_mod_from_zip(upload, mods_dir)
+
+    assert result["name"] == "copper tools"
+    assert (mods_dir / upload.name).read_bytes() == upload.read_bytes()
+    assert not installed.exists()
+    assert other.is_file()
+
+
+def test_import_requires_string_mod_metadata(tmp_path):
+    upload = tmp_path / "release.zip"
+    with zipfile.ZipFile(upload, "w") as archive:
+        archive.writestr("demo/info.json", json.dumps({"name": ["demo"], "version": "1.0.0"}))
+    mods_dir = tmp_path / "mods"
+
+    with pytest.raises(ValueError):
+        mods.install_mod_from_zip(upload, mods_dir)
+    assert not mods_dir.exists()

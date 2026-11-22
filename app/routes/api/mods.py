@@ -243,9 +243,9 @@ def api_mods_bulk_update(
         try:
             mod_service.refresh_catalog()
             synced = True
-        except Exception as e:
+        except (mod_service.PortalListingError, OSError) as exc:
             raise ApiAuthError(502, "portal_unreachable",
-                               tr("api_v1.mod_sync_failed", detail=e))
+                               tr("api_v1.mod_sync_failed", detail=tr("settings.general.unavailable"))) from exc
 
     # 2. Определить какие моды обновлять.
     sdir = spec.data_dir

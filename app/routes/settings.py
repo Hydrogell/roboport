@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -317,7 +318,7 @@ def settings_page(request: Request,
         if not src_dir.is_dir():
             continue
         for p in src_dir.iterdir():
-            if not p.is_file() or p.name in seen_names:
+            if p.name in seen_names or p.is_symlink() or not p.is_file():
                 continue
             if not (p.name.endswith(".tar.gz") or p.name.endswith(".tgz")
                     or p.name.endswith(".zip")):
@@ -787,9 +788,10 @@ def panel_restart(request: Request,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except Exception as e:
+    except OSError:
+        logging.getLogger(__name__).exception("Could not start the panel restart process")
         return JSONResponse(
-            {"error": "spawn_failed", "message": str(e)[:200]},
+            {"error": "spawn_failed", "message": tr("main.internal_error_title")},
             status_code=500)
 
     return JSONResponse(
@@ -1000,24 +1002,13 @@ def panel_update_install(
         elif source == "upload":
             if not upload_filename.strip():
                 return _update_redirect(err=tr("settings.update_upload_filename_required"))
-            fname = Path(upload_filename.strip()).name
-            # Сначала ищем в новой папке UPLOADS_DIR, потом fallback в STAGING_DIR
-            # (чтобы старые загрузки до миграции не сломались).
-            archive = _upd.UPLOADS_DIR / fname
-            if not archive.exists():
-                legacy = _upd.STAGING_DIR / fname
-                if legacy.exists():
-                    archive = legacy
-                else:
-                    return _update_redirect(err=tr(
-                        "settings.update_upload_missing",
-                        filename=upload_filename,
-                    ))
-            plan = _upd.prepare_from_upload(archive)
+            plan = _upd.prepare_from_upload(upload_filename)
         else:
             return _update_redirect(err=tr("settings.update_source_unknown", source=source))
-    except RuntimeError as e:
-        return _update_redirect(err=tr("settings.update_preparation_failed", detail=e))
+    except (_upd.InvalidUpdateFilename, FileNotFoundError) as exc:
+        return _update_redirect(err=str(exc))
+    except RuntimeError as exc:
+        return _update_redirect(err=tr("settings.update_preparation_failed", detail=exc))
 
     initiator = user.username if user else "ui:unknown"
     try:
@@ -1044,22 +1035,15 @@ def panel_update_upload(
     file: UploadFile = File(...),
     db: sqlite3.Connection = Depends(get_db),
 ):
-    """Принять multipart-архив (.tar.gz/.zip) и положить в .update-staging/.
-    После — отдельная форма с source=upload и upload_filename."""
+    """Keep an uploaded release archive for a separate install request."""
     from .. import panel_update as _upd
     if not file.filename:
         return _update_redirect(err=tr("settings.update_file_not_selected"))
-    fname = Path(file.filename).name
-    if not (fname.endswith(".tar.gz") or fname.endswith(".tgz") or fname.endswith(".zip")):
-        return _update_redirect(err=tr("settings.update_file_type_invalid"))
-    # ВАЖНО: пишем в UPLOADS_DIR, НЕ в STAGING_DIR. execute_install rmtree'ит
-    # staging до распаковки, поэтому архив нельзя там держать — иначе он
-    # удалится раньше чем tarfile успеет его прочитать.
-    _upd.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    dst = _upd.UPLOADS_DIR / fname
-    with open(dst, "wb") as f:
-        while chunk := file.file.read(64 * 1024):
-            f.write(chunk)
+    try:
+        dst = _upd.store_uploaded_archive(file.filename, file.file)
+    except _upd.InvalidUpdateFilename as exc:
+        return _update_redirect(err=str(exc))
+    fname = dst.name
     user = getattr(request.state, "user", None)
     if user:
         audit(db, "panel.update.upload", None,

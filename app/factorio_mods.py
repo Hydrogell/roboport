@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -30,6 +31,7 @@ from .i18n import tr
 # Populate the credential environment from .env, keeping shell values first.
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 _archive_update_lock = Lock()
 
 
@@ -85,7 +87,8 @@ def refresh_catalog() -> dict:
     try:
         data = http_get_json(f"{MOD_API}/mods?page_size=max")
     except Exception as exc:
-        raise PortalListingError(str(exc)) from exc
+        logger.warning("Mod Portal catalog request failed (%s)", type(exc).__name__)
+        raise PortalListingError(tr("settings.general.unavailable")) from exc
 
     return save_catalog(CACHE_FILE, data.get("results", []))
 
@@ -320,23 +323,37 @@ def find_release(name: str, want_version: str | None,
     return candidates[-1] if candidates else None
 
 
+class InvalidModArchive(ValueError):
+    """An archive could not be identified as a Factorio mod."""
+
+
 def install_mod_from_zip(tmp_zip: Path, target_dir: Path) -> dict:
     """Установить мод из загруженного zip'а: валидируем info.json, переименовываем
     в каноническое <name>_<version>.zip, перезаписываем старые версии этого мода."""
     info = read_mod_info(tmp_zip)
     if info is None:
-        raise ValueError(tr("mods.archive_missing_info_json"))
+        raise InvalidModArchive(tr("mods.archive_missing_info_json"))
+    if not isinstance(info, dict):
+        raise InvalidModArchive(tr("mods.archive_invalid"))
     name = info.get("name")
     version = info.get("version")
     if not name or not version:
-        raise ValueError(tr("mods.info_json_missing_required_fields"))
+        raise InvalidModArchive(tr("mods.info_json_missing_required_fields"))
+    if (not isinstance(name, str) or any(ch in name for ch in "/\\:")
+            or any(ord(ch) < 32 for ch in name)
+            or not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)):
+        raise InvalidModArchive(tr("mods.archive_invalid"))
 
     target_dir.mkdir(exist_ok=True)
-    # Снести старые версии этого же мода
-    for old in target_dir.glob(f"{name}_*.zip"):
-        old.unlink()
     canonical = target_dir / f"{name}_{version}.zip"
-    shutil.copyfile(tmp_zip, canonical)
+    with tempfile.TemporaryDirectory(prefix=".mod-import-", dir=target_dir) as staging:
+        uploaded = Path(staging) / "archive.zip"
+        shutil.copyfile(tmp_zip, uploaded)
+        with _archive_update_lock:
+            uploaded.replace(canonical)
+            for old in target_dir.glob("*.zip"):
+                if old != canonical and old.stem.rpartition("_")[0] == name:
+                    old.unlink()
     return {"name": name, "version": version, "title": info.get("title") or name,
             "factorio_version": info.get("factorio_version")}
 
@@ -378,8 +395,9 @@ def install_missing(wanted: list[dict],
         try:
             download_release(rel, user, token, target_dir)
             summary["installed"].append({"name": name, "version": rel["version"]})
-        except Exception as e:
-            summary["failed"].append({"name": name, "reason": str(e)[:80]})
+        except Exception as exc:
+            logger.warning("Mod Portal download failed (%s)", type(exc).__name__)
+            summary["failed"].append({"name": name, "reason": "download_failed"})
     return summary
 
 
@@ -417,5 +435,6 @@ def update_installed_mod(current: dict, version: str, mods_dir: Path, factorio_v
                             destination.replace(downloaded)
                         raise
     except OSError as exc:
-        return str(exc)[:80] or "install_failed"
+        logger.warning("Could not replace a mod archive (%s)", type(exc).__name__)
+        return "install_failed"
     return None

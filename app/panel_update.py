@@ -21,10 +21,10 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import shutil
+import stat
 import tempfile
 import sqlite3
 import subprocess
@@ -32,12 +32,13 @@ import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import BinaryIO
 
 from . import GITHUB_REPOSITORY, __version__
 from .i18n import tr
@@ -128,7 +129,7 @@ _REPO_RE = __import__("re").compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
 
 def is_valid_repo(repo: str) -> bool:
     """`owner/name` без слешей внутри сегментов и без шемы."""
-    return bool(_REPO_RE.match(repo or ""))
+    return bool(_REPO_RE.fullmatch(repo or ""))
 
 
 # =============================================================================
@@ -173,9 +174,11 @@ def check_github(repo: str) -> ReleaseInfo:
             raise RuntimeError(
                 tr("panel_update.github_rate_limited")
             ) from e
-        raise RuntimeError(tr("panel_update.github_api_error", status=e.code, detail=e.reason)) from e
+        raise RuntimeError(tr("panel_update.github_api_error", status=e.code,
+                              detail=tr("settings.general.unavailable"))) from e
     except urllib.error.URLError as e:
-        raise RuntimeError(tr("panel_update.github_connection_failed", detail=e.reason)) from e
+        raise RuntimeError(tr("panel_update.github_connection_failed",
+                              detail=tr("settings.general.unavailable"))) from e
 
     return ReleaseInfo(
         tag=data.get("tag_name") or "",
@@ -313,30 +316,37 @@ def download_tarball(url: str, dest: Path) -> int:
 # =============================================================================
 
 def extract_archive(archive: Path, dest: Path) -> Path:
-    """Распаковать tar.gz/zip в dest. Возвращает путь к корневой папке (внутри
-    архива GitHub кладёт всё в `<repo>-<sha>/...`, мы возвращаем эту папку).
-
-    Защита от path-traversal: проверяем что все имена внутри архива не
-    содержат '..' и не абсолютные."""
+    """Unpack application files and return the root that contains app/main.py."""
     dest.mkdir(parents=True, exist_ok=True)
-
+    dest = dest.resolve()
     if archive.suffix == ".zip" or zipfile.is_zipfile(archive):
         with zipfile.ZipFile(archive) as zf:
-            for name in zf.namelist():
-                _check_safe_path(name)
+            for entry in zf.infolist():
+                _check_safe_path(dest, entry.orig_filename)
+                if stat.S_ISLNK(entry.external_attr >> 16):
+                    raise RuntimeError(tr("panel_update.archive_has_link", path=entry.filename))
             zf.extractall(dest)
     else:
-        # Считаем что это tar.gz / tar.xz / tar
         with tarfile.open(archive) as tf:
-            for member in tf.getmembers():
-                _check_safe_path(member.name)
-                if member.islnk() or member.issym():
+            # Copy only files and directories. Tar metadata must not set the
+            # owner's identity, create special files or set privileged mode bits.
+            members = tf.getmembers()
+            for member in members:
+                _check_safe_path(dest, member.name)
+                if member.issym() or member.islnk():
                     raise RuntimeError(tr("panel_update.archive_has_link", path=member.name))
-            # Python 3.12+: filter='data' — отбрасывает unsafe-вещи
-            try:
-                tf.extractall(dest, filter="data")
-            except TypeError:
-                tf.extractall(dest)
+                if not (member.isreg() or member.isdir()):
+                    raise RuntimeError(tr("panel_update.archive_unsafe_path", path=repr(member.name)))
+            for member in members:
+                path = dest / member.name
+                if member.isdir():
+                    path.mkdir(parents=True, exist_ok=True)
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with tf.extractfile(member) as source, path.open("xb") as target:
+                    shutil.copyfileobj(source, target)
+                if member.mode & 0o111:
+                    path.chmod(stat.S_IMODE(path.stat().st_mode) | (member.mode & 0o111))
 
     # Найти top-level dir с приложением (где есть app/main.py)
     candidates = [p for p in dest.iterdir() if p.is_dir()]
@@ -349,11 +359,10 @@ def extract_archive(archive: Path, dest: Path) -> Path:
     raise RuntimeError(tr("panel_update.archive_roboport_missing"))
 
 
-def _check_safe_path(name: str) -> None:
-    if not name:
-        return
-    norm = name.replace("\\", "/")
-    if norm.startswith("/") or ".." in norm.split("/"):
+def _check_safe_path(dest: Path, name: str) -> None:
+    if (not name or name.startswith("/") or "\\" in name or ":" in name
+            or "\0" in name or ".." in name.split("/")
+            or not (dest / name).resolve().is_relative_to(dest)):
         raise RuntimeError(tr("panel_update.archive_unsafe_path", path=repr(name)))
 
 
@@ -555,38 +564,77 @@ class InstallPlan:
 
 
 def prepare_from_github(repo: str, tag: str) -> InstallPlan:
-    """Скачать tarball под /tmp."""
+    """Download a release to a unique local file independent of its tag."""
     if not is_valid_repo(repo):
         raise RuntimeError(tr("panel_update.repository_unrecognized", repo=repo))
     if not tag:
         raise RuntimeError(tr("settings.update_tag_required"))
-    url = f"https://api.github.com/repos/{repo}/tarball/{tag}"
-    archive = STAGING_DIR / f"{tag.replace('/', '_')}.tar.gz"
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    download_tarball(url, archive)
-    return InstallPlan(
-        source=f"github:{tag}",
-        archive_path=archive,
-        cleanup_archive=True,
-    )
+    tag_path = urllib.parse.quote(tag, safe="")
+    url = f"https://api.github.com/repos/{repo}/tarball/{tag_path}"
+    fd, name = tempfile.mkstemp(prefix="roboport-github-", suffix=".tar.gz")
+    os.close(fd)
+    archive = Path(name)
+    try:
+        download_tarball(url, archive)
+    except BaseException:
+        archive.unlink(missing_ok=True)
+        raise
+    return InstallPlan(source=f"github:{tag}", archive_path=archive, cleanup_archive=True)
 
 
-def prepare_from_upload(uploaded_archive: Path) -> InstallPlan:
-    return InstallPlan(
-        source=f"upload:{uploaded_archive.name}",
-        archive_path=uploaded_archive,
-        cleanup_archive=True,
-    )
+class InvalidUpdateFilename(ValueError):
+    """An upload must be identified by a simple archive filename."""
 
 
-def execute_install(conn: sqlite3.Connection, plan: InstallPlan,
-                    initiated_by: str) -> int:
-    """Полный цикл апдейта (без блокирующего ожидания health). Возвращает
-    update_id чтобы UI мог поллить status."""
+def _upload_path(directory: Path, filename: str) -> Path:
+    if not filename.endswith((".tar.gz", ".tgz", ".zip")):
+        raise InvalidUpdateFilename(tr("settings.update_file_type_invalid"))
+    if any(char in filename for char in "/\\:") or any(ord(char) < 32 for char in filename):
+        raise InvalidUpdateFilename(tr("common.invalid_filename"))
+    directory = directory.resolve()
+    path = directory / filename
+    if path.is_symlink() or path.resolve().parent != directory:
+        raise InvalidUpdateFilename(tr("common.invalid_filename"))
+    return path
+
+
+def store_uploaded_archive(filename: str, source: BinaryIO) -> Path:
+    """Publish a complete archive so installers never see a partial upload."""
+    dest = _upload_path(UPLOADS_DIR, filename)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    target = tempfile.NamedTemporaryFile(dir=dest.parent, prefix=".upload-", suffix=".part", delete=False)
+    temp = Path(target.name)
+    try:
+        with target:
+            shutil.copyfileobj(source, target, length=64 * 1024)
+        temp.replace(dest)
+    finally:
+        temp.unlink(missing_ok=True)
+    return dest
+
+
+def prepare_from_upload(filename: str) -> InstallPlan:
+    # The v1.0.0 REST API stored uploads in the staging directory.
+    for directory in (UPLOADS_DIR, STAGING_DIR):
+        archive = _upload_path(directory, filename)
+        if archive.is_file():
+            return InstallPlan(source=f"upload:{filename}", archive_path=archive, cleanup_archive=True)
+    raise FileNotFoundError(tr("settings.update_upload_missing", filename=filename))
+
+
+def execute_install(conn: sqlite3.Connection, plan: InstallPlan, initiated_by: str) -> int:
+    try:
+        return _install_archive(conn, plan, initiated_by)
+    finally:
+        if plan.source.startswith("github:") and plan.cleanup_archive:
+            plan.archive_path.unlink(missing_ok=True)
+
+
+def _install_archive(conn: sqlite3.Connection, plan: InstallPlan, initiated_by: str) -> int:
+    """Install code and let the watchdog check the restarted service."""
     preflight_check()
 
-    # 0. Если архив лежит ВНУТРИ STAGING_DIR (старый upload-flow) или это
-    #    свежескачанный github-tarball который тоже клался в staging —
+    # 0. Если архив лежит внутри STAGING_DIR (старый upload-flow) —
     #    rmtree(STAGING_DIR) ниже его прибьёт раньше чем мы успеем прочитать.
     #    Перенесём сначала во временный файл вне staging, и подменим путь.
     archive_path = plan.archive_path

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -76,11 +75,12 @@ def api_panel_update_install(
         if not body.upload_filename:
             raise ApiAuthError(400, "missing_filename",
                                tr("settings.update_upload_filename_required"))
-        archive = panel_update.STAGING_DIR / body.upload_filename
-        if not archive.exists():
-            raise ApiAuthError(404, "upload_not_found",
-                               tr("settings.update_upload_missing", filename=body.upload_filename))
-        plan = panel_update.prepare_from_upload(archive)
+        try:
+            plan = panel_update.prepare_from_upload(body.upload_filename)
+        except panel_update.InvalidUpdateFilename as exc:
+            raise ApiAuthError(400, "bad_format", str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise ApiAuthError(404, "upload_not_found", str(exc)) from exc
     else:
         raise ApiAuthError(400, "bad_source", tr("api_v1.update_source_invalid"))
 
@@ -92,8 +92,9 @@ def api_panel_update_install(
     except RuntimeError as e:
         raise ApiAuthError(500, "install_failed", str(e))
 
-    audit(db, action="panel.update.started", server_uuid=None,
-          actor=f"api:{key.name}", details={"update_id": update_id, "source": plan.source})
+    audit(db, "panel.update.started",
+          summary=f"api:{key.name} → {plan.source} (id={update_id})")
+    db.commit()
     return {"update_id": update_id, "status": "running",
             "message": tr("api_v1.update_install_started")}
 
@@ -104,20 +105,14 @@ def api_panel_update_upload(
     file: Annotated[UploadFile, File(...)],
     key: Annotated[auth_lib.ApiKeyInfo, Depends(require_api_key("admin"))],
 ) -> dict:
-    """Принять multipart-файл, положить в .update-staging/. После — отдельный
-    POST /panel/update/install с source=upload и upload_filename."""
+    """Keep the uploaded archive until a later install request selects it."""
     if not file.filename:
         raise ApiAuthError(400, "no_filename", tr("settings.update_file_not_selected"))
-    fname = Path(file.filename).name  # strip path
-    if not (fname.endswith(".tar.gz") or fname.endswith(".tgz") or fname.endswith(".zip")):
-        raise ApiAuthError(400, "bad_format", tr("settings.update_file_type_invalid"))
-
-    panel_update.STAGING_DIR.mkdir(parents=True, exist_ok=True)
-    dst = panel_update.STAGING_DIR / fname
-    with open(dst, "wb") as f:
-        while chunk := file.file.read(64 * 1024):
-            f.write(chunk)
-    return {"filename": fname, "size": dst.stat().st_size}
+    try:
+        dest = panel_update.store_uploaded_archive(file.filename, file.file)
+    except panel_update.InvalidUpdateFilename as exc:
+        raise ApiAuthError(400, "bad_format", str(exc)) from exc
+    return {"filename": dest.name, "size": dest.stat().st_size}
 
 
 @router.get("/panel/update/status/{update_id}", summary="Статус апдейта")
@@ -157,7 +152,8 @@ def api_panel_update_rollback(
         )
     except RuntimeError as e:
         raise ApiAuthError(400, "rollback_failed", str(e))
-    audit(db, action="panel.update.rollback", server_uuid=None,
-          actor=f"api:{key.name}", details={"src_update_id": update_id, "rollback_id": rb_id})
+    audit(db, "panel.update.rollback",
+          summary=f"api:{key.name} rollback to backup of update #{update_id} (new id={rb_id})")
+    db.commit()
     return {"update_id": rb_id, "status": "running",
             "message": tr("api_v1.update_rollback_started")}
